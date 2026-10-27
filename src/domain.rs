@@ -185,6 +185,42 @@ impl Data {
         Some(())
     }
 
+    /// Moves a Board into the gap before the active Board at `gap` (`gap` counts active
+    /// Boards only; past the end = last). Archived Boards keep their order.
+    pub fn move_board(&mut self, id: Id, gap: usize) -> Option<()> {
+        let at = self.boards.iter().position(|b| b.id == id && !b.archived)?;
+        let from = self.boards[..at].iter().filter(|b| !b.archived).count();
+        let board = self.boards.remove(at);
+        let slot = gap.saturating_sub((from < gap) as usize);
+        let mut active = self.boards.iter().enumerate().filter(|(_, b)| !b.archived);
+        let at = match active.nth(slot) {
+            Some((i, _)) => i,
+            // After the last active Board (or no other active Board: stay put).
+            None => match self.boards.iter().rposition(|b| !b.archived) {
+                Some(last) => last + 1,
+                None => at,
+            },
+        };
+        self.boards.insert(at, board);
+        Some(())
+    }
+
+    /// Moves a Column into the gap before its Board's Column at `gap` (past the end = last).
+    pub fn move_column(&mut self, id: Id, gap: usize) -> Option<()> {
+        let columns = &mut self
+            .boards
+            .iter_mut()
+            .find(|b| b.columns.iter().any(|c| c.id == id))?
+            .columns;
+        let at = columns.iter().position(|c| c.id == id)?;
+        let column = columns.remove(at);
+        columns.insert(
+            gap.saturating_sub((at < gap) as usize).min(columns.len()),
+            column,
+        );
+        Some(())
+    }
+
     /// The Board to show for `current`: itself while active; if archived or gone, the next
     /// active Board below it, else the one above, else the first active one; `None` stays `None`.
     /// `order` is the Board IDs from before the change, used when `current` is gone.

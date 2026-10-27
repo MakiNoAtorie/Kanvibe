@@ -1,9 +1,12 @@
 //! The left sidebar: active Boards, the collapsed "Archived (n)" section and the footer.
-use iced::widget::{button, column, container, row, scrollable, space, text, text_input, tooltip};
+use iced::widget::{
+    button, column, container, mouse_area, row, scrollable, space, text, text_input, tooltip,
+};
 use iced::{Center, Element, Fill};
 
 use crate::app::{App, BOARD_NAME_INPUT, Message};
 use crate::domain::Board;
+use crate::drag::{self, Drag, Item, Target};
 
 const WIDTH: u32 = 220;
 const RAIL: u32 = 40;
@@ -24,9 +27,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     let (archived, active): (Vec<&Board>, Vec<&Board>) =
         app.data.boards.iter().partition(|b| b.archived);
+    // Gaps before each active Board and after the last; only a Board drag registers them.
+    let dragged = matches!(app.drag.as_ref().map(|d| d.item), Some(Item::Board(_)));
+    let hovered = app.drag.as_ref().and_then(Drag::target);
+    let gap = |i: usize, content| gap(i, content, hovered, dragged);
     let boards = active
         .iter()
-        .map(|b| board_row(b, Some(b.id) == app.current_board));
+        .enumerate()
+        .map(|(i, b)| gap(i, board_row(b, Some(b.id) == app.current_board)))
+        .chain([gap(active.len(), space().height(12).into())]);
     let archived_section = (!archived.is_empty()).then(|| {
         let heading = button(text(format!("Archived ({})", archived.len())))
             .style(button::text)
@@ -72,6 +81,20 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .into()
 }
 
+/// A drop gap before the active Board at `i`, holding `content` below its indicator.
+fn gap<'a>(
+    i: usize,
+    content: Element<'a, Message>,
+    hovered: Option<Target>,
+    dragged: bool,
+) -> Element<'a, Message> {
+    let slot = column![
+        drag::indicator(hovered == Some(Target::BoardGap(i))),
+        content
+    ];
+    drag::target(mouse_area(slot), Target::BoardGap(i), dragged).into()
+}
+
 /// An active Board's row: its name, highlighted when current; a click opens it.
 /// Kept small so drag and drop can wrap it as a drop target.
 pub fn board_row(board: &Board, current: bool) -> Element<'_, Message> {
@@ -80,11 +103,15 @@ pub fn board_row(board: &Board, current: bool) -> Element<'_, Message> {
     } else {
         button::text
     };
-    button(clipped(&board.name))
-        .style(style)
-        .width(Fill)
-        .on_press(Message::OpenBoard(board.id))
-        .into()
+    // No `on_press`: the button must not capture the press the drag source needs. A press
+    // released under the drag threshold opens the Board (see `Message::DragEnd`).
+    let row = button(clipped(&board.name))
+        .style(move |theme, status| match status {
+            button::Status::Disabled => style(theme, button::Status::Active),
+            status => style(theme, status),
+        })
+        .width(Fill);
+    drag::source(row, Item::Board(board.id)).into()
 }
 
 /// One line, clipped, with the full name in a tooltip.
