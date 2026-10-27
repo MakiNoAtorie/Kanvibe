@@ -39,6 +39,7 @@ impl App {
             column![
                 header,
                 self.editable_name(Field::CardTitle(card.id), &card.title, 20),
+                self.labels_row(card),
                 text(times).size(12),
             ]
             .spacing(12),

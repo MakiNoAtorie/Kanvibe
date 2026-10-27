@@ -11,6 +11,7 @@ use iced::{Theme, time, window};
 use crate::domain::{Board, Column, Data, Id};
 use crate::history::History;
 use crate::keys::{self, Context, Input};
+use crate::labels::{self, LabelPicker};
 use crate::storage::{self, Settings};
 use std::fs;
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ use std::time::{Duration, Instant};
 
 const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
-const EDIT_INPUT: &str = "edit";
+pub(crate) const EDIT_INPUT: &str = "edit";
 const LIMIT_INPUT: &str = "limit";
 /// How long after the last keystroke a pending edit's live text is written to disk.
 const IDLE_WRITE: Duration = Duration::from_secs(1);
@@ -59,6 +60,8 @@ pub struct App {
     pub panel: Option<Id>,
     /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
     pub rotation: storage::Rotation,
+    /// The Label picker over the open Card's panel; see `labels`.
+    pub label_picker: Option<LabelPicker>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,12 +129,16 @@ pub enum Field {
     BoardName(Id),
     ColumnName(Id),
     CardTitle(Id),
+    LabelName(Id),
 }
 
 impl Field {
     fn id(self) -> Id {
         match self {
-            Field::BoardName(id) | Field::ColumnName(id) | Field::CardTitle(id) => id,
+            Field::BoardName(id)
+            | Field::ColumnName(id)
+            | Field::CardTitle(id)
+            | Field::LabelName(id) => id,
         }
     }
 }
@@ -202,6 +209,24 @@ pub enum Message {
     ClosePanel,
     /// F2: edit the open Card's title.
     EditTitle,
+    /// L, or a click on the panel's Labels row: open the Label picker.
+    OpenLabels,
+    CloseLabels,
+    /// A picker checkbox: attach or detach the Label on the picker's Card.
+    ToggleLabel(Id),
+    /// A picker pencil: open (or close) the Label's editor and start renaming it.
+    EditLabel(Id),
+    /// A palette key for the Label.
+    SetLabelColor(Id, String),
+    /// "Delete Label": asks first when the Label is on Cards.
+    DeleteLabel(Id),
+    ConfirmDeleteLabel,
+    CancelDeleteLabel,
+    /// "+ New Label".
+    NewLabel,
+    NewLabelChanged(String),
+    NewLabelColor(String),
+    CreateLabel,
 }
 
 impl App {
@@ -257,6 +282,7 @@ impl App {
                 }
             }
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
+            Message::Escape if self.label_picker.is_some() => self.escape_labels(),
             Message::Escape => {
                 // One layer per press: the text field, the Card panel, then the selection.
                 if self.board_name.is_none()
@@ -305,6 +331,18 @@ impl App {
                     return self.update(Message::StartEdit(Field::CardTitle(card)));
                 }
             }
+            Message::OpenLabels
+            | Message::CloseLabels
+            | Message::ToggleLabel(_)
+            | Message::EditLabel(_)
+            | Message::SetLabelColor(..)
+            | Message::DeleteLabel(_)
+            | Message::ConfirmDeleteLabel
+            | Message::CancelDeleteLabel
+            | Message::NewLabel
+            | Message::NewLabelChanged(_)
+            | Message::NewLabelColor(_)
+            | Message::CreateLabel => return self.update_labels(message),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -356,6 +394,7 @@ impl App {
                         (CAPTURE_INPUT, Input::Capture),
                         (EDIT_INPUT, Input::Edit),
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
+                        (labels::NEW_INPUT, Input::Edit),
                     ]
                     .into_iter()
                     .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
@@ -380,7 +419,8 @@ impl App {
             }
             Message::EditChanged(text) => {
                 if let Some(edit) = &mut self.editing {
-                    let live = if text.trim().is_empty() {
+                    let clash = self.data.is_label_clash(edit.field.id(), &text);
+                    let live = if text.trim().is_empty() || clash {
                         &edit.start
                     } else {
                         &text
@@ -505,6 +545,7 @@ impl App {
             let board = match edit.field {
                 Field::BoardName(_) => None,
                 Field::ColumnName(column) => self.board_of_column(column),
+                Field::LabelName(label) => self.data.board_of_label(label),
                 Field::CardTitle(card) => {
                     if self.data.name(card) != Some(edit.start.as_str()) {
                         self.data.touch(card); // a changed title is the Card's own change
@@ -554,6 +595,7 @@ impl App {
     /// longer an active Card on the current Board, and an open panel follows the selected Card.
     fn validate_ui(&mut self) {
         self.validate_selection();
+        self.validate_labels();
         let on_board = |card: Id| {
             self.board().is_some_and(|b| {
                 b.columns
@@ -567,7 +609,7 @@ impl App {
         }
     }
 
-    fn board_of_card(&self, card: Id) -> Option<Id> {
+    pub(crate) fn board_of_card(&self, card: Id) -> Option<Id> {
         let board = self.data.boards.iter().find(|b| {
             b.columns
                 .iter()
@@ -577,7 +619,7 @@ impl App {
     }
 
     /// The current Board.
-    fn board(&self) -> Option<&Board> {
+    pub(crate) fn board(&self) -> Option<&Board> {
         let id = self.current_board?;
         self.data.boards.iter().find(|b| b.id == id)
     }
@@ -682,6 +724,10 @@ impl App {
             Some(card) => row![container(content).width(Fill), self.view_panel(card)].into(),
             None => content,
         };
+        let content: Element<_> = match &self.label_picker {
+            Some(picker) => stack![content, self.view_label_picker(picker)].into(),
+            None => content,
+        };
         let content: Element<_> = match &self.not_saved {
             Some(error) => column![
                 container(text(error))
@@ -753,7 +799,9 @@ impl App {
                 column: col.id,
                 card: Some(card.id),
             });
-            let card_box = container(text(&card.title))
+            let title = text(&card.title);
+            let chips = self.board().and_then(|b| labels::chips(b, card));
+            let card_box = container(column![title].spacing(4).extend(chips))
                 .id(card_widget(card.id))
                 .width(Fill)
                 .padding(8)
