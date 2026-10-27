@@ -32,6 +32,22 @@
 - Dates: `jiff` (not `time`). `Timestamp::strftime`; local via `Timestamp::try_from(SystemTime)?.to_zoned(TimeZone::system())`.
 - Storage test helpers: `backup(dir, name, &data)`, `corrupt_files(dir)`, `problem(&screen)`, `opened(screen)`. A folder named `kanvibe.json` forces an I/O error cross-platform.
 
+## Selection and keys (#7, `src/keys.rs`)
+- Key flow: subscription sends `Message::Key(event)` for uncaptured presses; `update` queries focus, then `Message::KeyWithFocus(event, Option<selector::Target>)` builds `keys::Context` and runs `keys::map`, whose Message goes back through `update`. Tests send `KeyWithFocus(event, None)` or call `keys::map`.
+- A captured Esc is sent as `Message::Escape` (the "leave text field" layer). New Esc layers go in that arm; it clears selection only when nothing else is open.
+- A focused text field suppresses arrows, Ctrl+arrows, N; Ctrl+Z/Y and Esc still map. Every new text box needs a widget Id and a `keys::Input` variant wired into the `KeyWithFocus` Id table. `keys::Context` holds `focused` only; panel/archive/drag/dialog get added by their tickets.
+- New shortcuts: new `Message` variant + arm in `keys::map`. Use `Message::Undo`/`Message::Redo`. `Message` derives `PartialEq`.
+- `App.selection: Option<Selection { column, card }>`; `Message::Select(Selection)`. Anything changing the selection returns `reveal_selection()`. `App::validate_selection()` after undo/redo, Board creation, Board switch, import. `outlined(base_style, selected)` style helper. `Data::move_card(card, column, index)` (index clamped).
+- Widget Ids: `BOARD_SCROLL`, `column_widget(id)`, `cards_widget(id)`, `card_widget(id)`; `reveal(scrollable, child, horizontal)`.
+- Test helpers (`tests/update.rs`): `key(Named, ctrl)`, `app_with_cards()` (To do: A,B,C; Doing empty; Done: D), `selected(app, col, Option<card>)`, `card_id`.
+
+## Columns (#10)
+- `Data::add_column(board) -> Option<Id>`, `Data::set_limit(column, &str) -> Option<()>` (blank clears; invalid returns `None`). `Column.limit: Option<u32>` (`skip_serializing_if`). `Column::over_limit()`, `Column::count_label()`.
+- App: `column_menu: Option<Id>`, `limit_input: Option<LimitInput { column, text }>`; Messages `AddColumn`, `ToggleColumnMenu`, `OpenLimit`, `LimitChanged`, `SubmitLimit`; `LIMIT_INPUT`. The limit prompt is not a pending edit; opening the menu/prompt calls `commit_pending()` first. The ⋯ menu is inline buttons under the header (#11 adds "Remove Column").
+- `editable_name` returns a clipped, tooltipped, `Fill`-width container; use it for any named header.
+- Feature-area tests may get their own file (`tests/columns.rs`) with local helpers to avoid conflicts in `tests/update.rs`.
+- iced: no `push_maybe`; use `column![..].extend(option)` and `.chain([...])`.
+
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.
@@ -56,5 +72,5 @@
 ## Windows tooling gotchas
 - In worktrees, Bash heredocs and multi-step git commands may be refused by the isolation check; use Write/Edit and simple git commands.
 - PowerShell 5.1: `git commit -F -` with a here-string breaks; write the message to a file and use `-F <file>`.
-- Disk: one shared build dir. Agents set `CARGO_TARGET_DIR` to the main checkout's `target/` (cargo locks it, so concurrent builds queue instead of each costing ~3 GB). Never create per-worktree or scratch target dirs.
+- Disk: build only in the worktree's own `target/` and delete it when done. Never share a `CARGO_TARGET_DIR` across worktrees: the `kanvibe` output file name is identical, so one worktree tests another's code.
 - Long worktree paths can hit MAX_PATH (LNK1104) on release builds; use a shorter `--target-dir`.
