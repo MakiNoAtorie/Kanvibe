@@ -490,12 +490,13 @@ fn each_load_class_reaches_its_screen() {
 #[test]
 fn restore_and_start_empty_open_the_app() {
     let (_tmp, dir) = data_dir();
-    backup(&dir, "kanvibe.json.bak1", &sample());
+    let data = sample(); // one sample: timestamps differ across a second boundary
+    backup(&dir, "kanvibe.json.bak1", &data);
     fs::write(dir.join("kanvibe.json"), "{ broken").unwrap();
 
     let mut screen = Screen::open(dir.clone());
     let _ = screen.update(startup::Message::Restore);
-    assert_eq!(opened(screen).data, sample());
+    assert_eq!(opened(screen).data, data);
 
     fs::write(dir.join("kanvibe.json"), "{ broken again").unwrap();
     let mut screen = Screen::open(dir.clone());

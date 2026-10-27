@@ -20,6 +20,18 @@ pub struct Board {
     pub archived: bool,
     #[serde(default)]
     pub columns: Vec<Column>,
+    /// Archived Cards, oldest archived first.
+    #[serde(default)]
+    pub archived_cards: Vec<Archived>,
+}
+
+/// A Card in its Board's Archive, remembering the Column it came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Archived {
+    pub card: Card,
+    /// The original Column; may point at a Column that no longer exists.
+    pub column_id: Id,
+    pub archived_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +72,16 @@ pub struct Card {
     pub updated: String,
 }
 
+fn archived(mut card: Card, column_id: Id) -> Archived {
+    let archived_at = now();
+    card.updated = archived_at.clone();
+    Archived {
+        card,
+        column_id,
+        archived_at,
+    }
+}
+
 /// The current time as an RFC 3339 UTC string with second precision.
 pub fn now() -> String {
     jiff::Timestamp::from_second(jiff::Timestamp::now().as_second())
@@ -93,6 +115,7 @@ impl Data {
             name: name.into(),
             archived: false,
             columns,
+            archived_cards: Vec::new(),
         });
         Some(id)
     }
@@ -221,6 +244,76 @@ impl Data {
         }
         let to = &mut self.boards[tb].columns[tc].cards;
         to.insert(index.min(to.len()), moving);
+    }
+
+    /// Sends an active Card to its Board's Archive, remembering its Column.
+    pub fn archive_card(&mut self, card: Id) -> Option<()> {
+        let (b, c) = self.column_where(|c| c.cards.iter().any(|x| x.id == card))?;
+        let board = &mut self.boards[b];
+        let column = &mut board.columns[c];
+        let at = column.cards.iter().position(|x| x.id == card)?;
+        let column_id = column.id;
+        let card = column.cards.remove(at);
+        board.archived_cards.push(archived(card, column_id));
+        Some(())
+    }
+
+    /// Removes a Column, archiving its Cards (in order) with it as their original Column.
+    /// Returns how many Cards were archived.
+    pub fn remove_column(&mut self, column: Id) -> Option<usize> {
+        let (b, c) = self.column_where(|x| x.id == column)?;
+        let board = &mut self.boards[b];
+        let removed = board.columns.remove(c);
+        let n = removed.cards.len();
+        let cards = removed.cards.into_iter().map(|card| archived(card, column));
+        board.archived_cards.extend(cards);
+        Some(n)
+    }
+
+    /// Puts an archived Card at the bottom of its original Column, else of its Board's first
+    /// Column; a Board without Columns gets a "To do" Column first. Returns the Column.
+    pub fn restore_card(&mut self, card: Id) -> Option<Id> {
+        let b = self
+            .boards
+            .iter()
+            .position(|b| b.archived_cards.iter().any(|a| a.card.id == card))?;
+        let spare = self.boards[b].columns.is_empty().then(|| self.new_id());
+        let board = &mut self.boards[b];
+        let at = board
+            .archived_cards
+            .iter()
+            .position(|a| a.card.id == card)?;
+        let Archived {
+            mut card,
+            column_id,
+            ..
+        } = board.archived_cards.remove(at);
+        card.updated = now();
+        if let Some(id) = spare {
+            board.columns.push(Column {
+                id,
+                name: "To do".into(),
+                limit: None,
+                cards: Vec::new(),
+            });
+        }
+        let target = board.columns.iter_mut().find(|c| c.id == column_id);
+        let target = match target {
+            Some(column) => column,
+            None => &mut board.columns[0],
+        };
+        target.cards.push(card);
+        Some(target.id)
+    }
+
+    /// Removes an archived Card for good.
+    pub fn delete_archived(&mut self, card: Id) -> Option<()> {
+        let board = self
+            .boards
+            .iter_mut()
+            .find(|b| b.archived_cards.iter().any(|a| a.card.id == card))?;
+        board.archived_cards.retain(|a| a.card.id != card);
+        Some(())
     }
 
     /// (Board index, Column index) of the first Column matching `f`.
