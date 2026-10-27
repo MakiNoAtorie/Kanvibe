@@ -1124,6 +1124,14 @@ impl App {
             self.left_board();
         }
         self.validate_selection();
+        // Undo or redo can take away the Column a ⋯ menu or limit prompt is open on.
+        let here = |c: &Id| {
+            self.data
+                .board_of_column(*c)
+                .is_some_and(|b| self.current_board == Some(b))
+        };
+        self.column_menu = self.column_menu.filter(here);
+        self.limit_input = self.limit_input.take().filter(|l| here(&l.column));
         self.validate_archive();
         self.validate_labels();
         self.validate_filter();
