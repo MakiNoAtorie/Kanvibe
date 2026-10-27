@@ -3,6 +3,7 @@ use iced::widget::{button, checkbox, column, mouse_area, row, text, text_input};
 use iced::{Center, Element, Fill};
 
 use crate::app::{App, Direction, EDIT_INPUT, Field, Message};
+use crate::chrome::tip;
 use crate::domain::{Card, Item};
 
 impl App {
@@ -11,7 +12,7 @@ impl App {
         column![text("Checklist").size(14)]
             .extend(items)
             .push(
-                button("+ Add item")
+                button("+ Add Checklist Item")
                     .style(button::text)
                     .on_press(Message::AddItem(card.id)),
             )
@@ -22,7 +23,7 @@ impl App {
     fn view_item<'a>(&'a self, item: &'a Item) -> Element<'a, Message> {
         let field = Field::ChecklistItem(item.id);
         let label: Element<_> = match &self.editing {
-            Some(edit) if edit.field == field => text_input("Item", &edit.text)
+            Some(edit) if edit.field == field => text_input("Checklist Item", &edit.text)
                 .id(EDIT_INPUT)
                 .on_input(Message::EditChanged)
                 .on_submit(Message::SubmitItem(item.id))
@@ -39,9 +40,18 @@ impl App {
         row![
             checkbox(item.done).on_toggle(|_| Message::ToggleItem(item.id)),
             label,
-            small("▲", Message::MoveItem(item.id, Direction::Up)),
-            small("▼", Message::MoveItem(item.id, Direction::Down)),
-            small("×", Message::RemoveItem(item.id)),
+            tip(
+                small("▲", Message::MoveItem(item.id, Direction::Up)),
+                "Move up"
+            ),
+            tip(
+                small("▼", Message::MoveItem(item.id, Direction::Down)),
+                "Move down"
+            ),
+            tip(
+                small("×", Message::RemoveItem(item.id)),
+                "Remove Checklist Item"
+            ),
         ]
         .spacing(6)
         .align_y(Center)

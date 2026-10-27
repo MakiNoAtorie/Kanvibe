@@ -273,3 +273,12 @@ fn the_checklist_is_saved_and_loaded() {
     assert_eq!(loaded, app.data);
     assert!(loaded.card(card).unwrap().checklist[0].done);
 }
+
+#[test]
+fn the_checklist_uses_the_glossary_words() {
+    let (mut app, _) = app_with_card();
+    send(&mut app, [Message::OpenPanel]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("+ Add Checklist Item").is_ok());
+    assert!(ui.find("+ Add item").is_err());
+}

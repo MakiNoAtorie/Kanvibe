@@ -306,7 +306,7 @@ pub enum Message {
     AskDelete(Id),
     /// Permanently deletes an archived Card (the action of its [`Confirm`]).
     DeleteCard(Id),
-    /// "Add item" in the Card's Checklist: a blank Item at the end, in edit.
+    /// "+ Add Checklist Item" in the Card's Checklist: a blank Item at the end, in edit.
     AddItem(Id),
     /// Enter in an Item: commit it and, unless it was blank, add one below.
     SubmitItem(Id),
@@ -1415,9 +1415,12 @@ impl App {
             button(text(format!("Archive ({})", board.archived_cards.len())))
                 .style(button::secondary)
                 .on_press(Message::OpenArchive),
-            button("⋯")
-                .style(button::text)
-                .on_press(Message::ToggleBoardMenu),
+            crate::chrome::tip(
+                button("⋯")
+                    .style(button::text)
+                    .on_press(Message::ToggleBoardMenu),
+                "Board menu"
+            ),
         ]
         .spacing(8)
         .align_y(Center);
@@ -1515,9 +1518,12 @@ impl App {
         let header = row![
             self.name_widget(Field::ColumnName(col.id), &col.name, 16, Some(item)),
             count,
-            button("⋯")
-                .style(button::text)
-                .on_press(Message::ToggleColumnMenu(col.id)),
+            crate::chrome::tip(
+                button("⋯")
+                    .style(button::text)
+                    .on_press(Message::ToggleColumnMenu(col.id)),
+                "Column menu"
+            ),
         ]
         .spacing(8)
         .align_y(Center);

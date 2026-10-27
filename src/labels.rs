@@ -381,11 +381,12 @@ impl App {
             let Some(picker) = editing else {
                 return line.into();
             };
-            line = line.push(
+            line = line.push(crate::chrome::tip(
                 button("✎")
                     .style(button::text)
                     .on_press(Message::EditLabel(id)),
-            );
+                "Rename or recolour",
+            ));
             if picker.expanded != Some(id) {
                 return line.into();
             }

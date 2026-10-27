@@ -117,10 +117,12 @@ impl App {
     /// The Board header's filter controls: the text box with ×, and the Labels button.
     pub(crate) fn filter_bar(&self) -> Element<'_, Message> {
         let clear = self.filter.is_on().then(|| {
-            button("×")
-                .style(button::text)
-                .on_press(Message::ClearFilter)
-                .into()
+            crate::chrome::tip(
+                button("×")
+                    .style(button::text)
+                    .on_press(Message::ClearFilter),
+                "Clear filter",
+            )
         });
         let labels = match self.filter.labels.len() {
             0 => "Labels".to_string(),
