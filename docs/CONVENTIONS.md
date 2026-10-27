@@ -13,6 +13,25 @@
 - View functions passed to `iced::application` must be named `fn`s; a closure fails with "ViewFn is not general enough".
 - iced 0.14 API notes: see the orchestrator's scratchpad `notes/iced-0.14.md`. `time::every` needs the iced `tokio` feature.
 
+## Text edits (#6)
+- At most one pending edit: `App.editing: Option<PendingEdit { field, start, text, typed_at }>` for renames, or `App.capture`. `pub fn App::commit_pending()` commits whichever is open, records one step (none if unchanged), closes the field. Every arm that changes domain data or UI context (selection, Board switch, drag start, panel close/switch, opening a field) calls it first.
+- `Field` enum (`BoardName(Id)`, `ColumnName(Id)`): new fields add a variant, arms in `Field::id`/`commit_pending`, and a domain getter/setter.
+- Messages: `StartEdit(Field)` (commits, focuses `EDIT_INPUT`), `EditChanged(String)`, `CommitEdit`, `EditTick(Instant)`, `CloseRequested`.
+- Live edits write into `data` per keystroke; blank text is stored as `start`, so data never holds an empty name. Only `commit_pending` records the step.
+- Domain: `Data::name(id)` / `Data::rename(id, name) -> Option<()>` for Board or Column.
+- Idle write: `save_if_changed` returns early while `editing.typed_at.is_some()`. Tests send `EditTick(Instant::now() + 1s)`; no sleeping.
+- Esc discards the capture box, then `commit_pending()`. A capture box interrupted by any other commit point adds its text as a Card.
+- `App::editable_name(field, name, size)` is the double-click-to-rename widget; reuse it.
+- Test helper `type_into(app, field, &[texts])` leaves an edit pending.
+
+## Startup (#19, `src/startup.rs`)
+- `main.rs` calls `kanvibe::startup::run()`; it owns the lock, the rfd box and the iced program. Program state `Screen::{App(App), Problem(Problem)}`, message `startup::Message::{App(app::Message), Retry, Restore, StartEmpty, Quit}`.
+- `Screen::update` calls `app.save_if_changed()` after `App::update`; `App` stays unaware of startup. Program uses `.exit_on_close_request(false)`; the Problem screen maps close requests to `Quit`.
+- `storage::load` -> `Result<Option<(Data, Settings)>, LoadError>`; `LoadError::{Newer, Io(io::Error), Unreadable(String)}`. `version` is required and read first. `App::open` -> `Result<App, LoadError>`.
+- `storage::{lock, backup, restore, start_empty, file_path}`. File names: `kanvibe.lock`, `kanvibe.json.bak1/.bak2` (const `BACKUPS`), `kanvibe.json.corrupt-YYYYMMDDTHHMMSSZ`.
+- Dates: `jiff` (not `time`). `Timestamp::strftime`; local via `Timestamp::try_from(SystemTime)?.to_zoned(TimeZone::system())`.
+- Storage test helpers: `backup(dir, name, &data)`, `corrupt_files(dir)`, `problem(&screen)`, `opened(screen)`. A folder named `kanvibe.json` forces an I/O error cross-platform.
+
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.

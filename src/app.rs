@@ -9,9 +9,9 @@ use iced::{time, window};
 use crate::domain::{Board, Column, Data, Id};
 use crate::history::History;
 use crate::storage::{self, Settings};
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use std::{fs, io};
 
 const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
@@ -369,8 +369,8 @@ fn undo_shortcut(event: &keyboard::Event) -> Option<bool> {
 
 impl App {
     /// Loads the data folder (created if missing) and reopens the last open Board, else the first.
-    pub fn open(dir: PathBuf) -> io::Result<App> {
-        fs::create_dir_all(&dir)?;
+    pub fn open(dir: PathBuf) -> Result<App, storage::LoadError> {
+        fs::create_dir_all(&dir).map_err(storage::LoadError::Io)?;
         let (data, settings) = storage::load(&dir)?.unwrap_or_default();
         let current_board = settings
             .last_board
@@ -405,31 +405,4 @@ impl App {
             Err(e) => eprintln!("Not saved: {}: {e}", dir.display()),
         }
     }
-}
-
-pub fn run() -> iced::Result {
-    let Some(dir) = storage::data_dir(std::env::args().skip(1)) else {
-        eprintln!("No local app data folder; pass --data-dir <path>");
-        std::process::exit(1);
-    };
-    // ponytail: a load error exits so the bad file is never overwritten; #19 adds the problem screens.
-    let app = match App::open(dir.clone()) {
-        Ok(app) => app,
-        Err(e) => {
-            eprintln!("Can't open {}: {e}", dir.display());
-            std::process::exit(1);
-        }
-    };
-    let app = std::cell::Cell::new(Some(app));
-    let boot = move || app.take().expect("iced boots once");
-    let update = |app: &mut App, message| {
-        let task = app.update(message);
-        app.save_if_changed();
-        task
-    };
-    iced::application(boot, update, App::view)
-        .title("Kanvibe")
-        .subscription(App::subscription)
-        .exit_on_close_request(false) // CloseRequested commits the pending edit first
-        .run()
 }
