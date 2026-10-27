@@ -20,6 +20,7 @@ const VERSION: u32 = 1;
 pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_board: Option<Id>,
+    pub sidebar_collapsed: bool,
 }
 
 #[derive(Serialize)]
