@@ -19,6 +19,8 @@ pub enum Input {
     Capture,
     /// The box of the pending edit (`app::Field`): a rename, later titles and the like.
     Edit,
+    /// The box of a pending Checklist Item edit.
+    Item,
 }
 
 /// Maps a key press to the Message it stands for. iced only delivers keys the focused widget
@@ -45,6 +47,13 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
     }
     if *key == Key::Named(Named::Escape) {
         return Some(Message::Escape);
+    }
+    if ctrl && context.focused == Some(Input::Item) {
+        match key {
+            Key::Named(Named::ArrowUp) => return Some(Message::MoveEditedItem(Direction::Up)),
+            Key::Named(Named::ArrowDown) => return Some(Message::MoveEditedItem(Direction::Down)),
+            _ => {}
+        }
     }
     if typing {
         return None;

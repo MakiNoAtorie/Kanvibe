@@ -40,6 +40,7 @@ impl App {
                 header,
                 self.editable_name(Field::CardTitle(card.id), &card.title, 20),
                 text(times).size(12),
+                self.view_checklist(card),
             ]
             .spacing(12),
         )

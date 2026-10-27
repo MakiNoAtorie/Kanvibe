@@ -55,6 +55,25 @@ pub struct Card {
     /// When the Card's own fields last changed (not when neighbouring Cards shift).
     #[serde(default)]
     pub updated: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checklist: Vec<Item>,
+}
+
+/// A Checklist Item. Edits target it by `id`, never by position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Item {
+    pub id: Id,
+    pub text: String,
+    #[serde(default)]
+    pub done: bool,
+}
+
+impl Card {
+    /// "done/total" when the Checklist has Items.
+    pub fn progress(&self) -> Option<String> {
+        let done = self.checklist.iter().filter(|i| i.done).count();
+        (!self.checklist.is_empty()).then(|| format!("{done}/{}", self.checklist.len()))
+    }
 }
 
 /// The current time as an RFC 3339 UTC string with second precision.
@@ -147,6 +166,7 @@ impl Data {
             title: title.into(),
             created: now.clone(),
             updated: now,
+            checklist: Vec::new(),
         });
         Some(id)
     }
@@ -197,7 +217,7 @@ impl Data {
 
     /// The name of the Board or Column, or the title of the Card, with this ID.
     pub fn name(&self, id: Id) -> Option<&str> {
-        self.boards.iter().find_map(|b| {
+        let found = self.boards.iter().find_map(|b| {
             if b.id == id {
                 return Some(b.name.as_str());
             }
@@ -210,7 +230,8 @@ impl Data {
                     .find(|x| x.id == id)
                     .map(|x| x.title.as_str())
             })
-        })
+        });
+        found.or_else(|| self.item(id).map(|i| i.text.as_str()))
     }
 
     /// Renames the Board or Column, or retitles the Card, with this ID to the trimmed name.
@@ -233,8 +254,82 @@ impl Data {
                     .find(|x| x.id == id)
                     .map(|x| &mut x.title)
             })
-        })?;
-        *target = name.into();
+        });
+        match target {
+            Some(target) => *target = name.into(),
+            None => self.item_mut(id)?.text = name.into(),
+        }
         Some(())
+    }
+
+    fn items_mut(&mut self) -> impl Iterator<Item = &mut Vec<Item>> {
+        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
+        columns.flat_map(|c| &mut c.cards).map(|c| &mut c.checklist)
+    }
+
+    fn item_mut(&mut self, id: Id) -> Option<&mut Item> {
+        self.items_mut().flatten().find(|i| i.id == id)
+    }
+
+    /// The Checklist Item with this ID.
+    pub fn item(&self, id: Id) -> Option<&Item> {
+        let columns = self.boards.iter().flat_map(|b| &b.columns);
+        let cards = columns.flat_map(|c| &c.cards);
+        cards.flat_map(|c| &c.checklist).find(|i| i.id == id)
+    }
+
+    /// The Card whose Checklist holds this Item.
+    pub fn card_of_item(&self, item: Id) -> Option<Id> {
+        let columns = self.boards.iter().flat_map(|b| &b.columns);
+        let mut cards = columns.flat_map(|c| &c.cards);
+        cards
+            .find(|c| c.checklist.iter().any(|i| i.id == item))
+            .map(|c| c.id)
+    }
+
+    /// Adds a blank Item after `after` (an Item of the Card), or at the end. The caller edits it
+    /// and removes it again if it stays blank. Does not touch `updated`. Unknown Card: nothing.
+    pub fn add_item(&mut self, card: Id, after: Option<Id>) -> Option<Id> {
+        let id = self.new_id();
+        let list = self.items_of(card)?;
+        let at = after.and_then(|a| list.iter().position(|i| i.id == a));
+        let at = at.map_or(list.len(), |p| p + 1);
+        list.insert(
+            at,
+            Item {
+                id,
+                text: String::new(),
+                done: false,
+            },
+        );
+        Some(id)
+    }
+
+    /// Ticks or unticks an Item.
+    pub fn toggle_item(&mut self, item: Id) -> Option<()> {
+        let item = self.item_mut(item)?;
+        item.done = !item.done;
+        Some(())
+    }
+
+    /// Moves an Item one place up (`-1`) or down (`1`); at an end, nothing changes and `None` returns.
+    pub fn move_item(&mut self, item: Id, by: isize) -> Option<()> {
+        let list = self.items_mut().find(|l| l.iter().any(|i| i.id == item))?;
+        let from = list.iter().position(|i| i.id == item)?;
+        let to = from.checked_add_signed(by).filter(|to| *to < list.len())?;
+        list.swap(from, to);
+        Some(())
+    }
+
+    pub fn remove_item(&mut self, item: Id) -> Option<()> {
+        let list = self.items_mut().find(|l| l.iter().any(|i| i.id == item))?;
+        list.retain(|i| i.id != item);
+        Some(())
+    }
+
+    fn items_of(&mut self, card: Id) -> Option<&mut Vec<Item>> {
+        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
+        let mut cards = columns.flat_map(|c| &mut c.cards);
+        cards.find(|c| c.id == card).map(|c| &mut c.checklist)
     }
 }
