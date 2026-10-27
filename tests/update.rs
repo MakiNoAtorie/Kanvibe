@@ -300,3 +300,149 @@ fn undo_never_rewinds_the_id_counter() {
 
     assert!(app.data.boards[0].columns[0].cards[0].id > first);
 }
+
+// --- Text edits (#6) ---
+
+use kanvibe::app::Field;
+
+/// Double-clicks a name and types each text in turn, leaving the edit pending.
+fn type_into(app: &mut App, field: Field, keystrokes: &[&str]) {
+    send(app, [Message::StartEdit(field)]);
+    send(
+        app,
+        keystrokes.iter().map(|t| Message::EditChanged((*t).into())),
+    );
+}
+
+#[test]
+fn a_rename_is_one_undo_step_not_one_per_keystroke() {
+    let mut app = app_with_board();
+    let board = app.data.boards[0].id;
+
+    type_into(
+        &mut app,
+        Field::BoardName(board),
+        &["H", "Ho", "Hom", "Home"],
+    );
+    send(&mut app, [Message::CommitEdit]);
+    assert_eq!(app.data.boards[0].name, "Home");
+    assert_eq!(app.editing, None);
+
+    send(&mut app, [ctrl("z", false)]);
+    assert_eq!(app.data.boards[0].name, "Work");
+    send(&mut app, [ctrl("y", false)]);
+    assert_eq!(app.data.boards[0].name, "Home");
+}
+
+#[test]
+fn ctrl_z_during_a_rename_returns_the_name_to_its_starting_value() {
+    let mut app = app_with_board();
+    let doing = column_id(&app, 1);
+
+    type_into(&mut app, Field::ColumnName(doing), &["In", "In progress"]);
+    send(&mut app, [ctrl("z", false)]);
+
+    assert_eq!(column_names(&app), ["To do", "Doing", "Done"]);
+    assert_eq!(app.editing, None);
+    assert_eq!(app.data.boards.len(), 1, "the step before is kept");
+}
+
+#[test]
+fn a_blank_name_reverts_and_an_unchanged_one_records_no_step() {
+    let mut app = app_with_board();
+    let board = app.data.boards[0].id;
+    let to_do = column_id(&app, 0);
+
+    type_into(&mut app, Field::BoardName(board), &["Wo", "   "]);
+    send(&mut app, [Message::CommitEdit]);
+    assert_eq!(app.data.boards[0].name, "Work");
+    type_into(&mut app, Field::ColumnName(to_do), &["To", "To do"]);
+    send(&mut app, [Message::CommitEdit]);
+    type_into(&mut app, Field::ColumnName(to_do), &["  Next  "]);
+    send(&mut app, [Message::CommitEdit]);
+    assert_eq!(column_names(&app)[0], "Next");
+
+    send(&mut app, [ctrl("z", false)]);
+    assert_eq!(column_names(&app)[0], "To do");
+    send(&mut app, [ctrl("z", false)]);
+    assert!(
+        app.data.boards.is_empty(),
+        "only creating the Board is left"
+    );
+}
+
+#[test]
+fn esc_and_opening_another_field_commit_the_pending_rename() {
+    let mut app = app_with_board();
+    let board = app.data.boards[0].id;
+    let [to_do, doing, done] = [0, 1, 2].map(|i| column_id(&app, i));
+
+    type_into(&mut app, Field::ColumnName(to_do), &["Backlog"]);
+    send(&mut app, [Message::Escape]);
+    type_into(&mut app, Field::ColumnName(doing), &["Now"]);
+    type_into(&mut app, Field::ColumnName(done), &["Shipped"]);
+    send(&mut app, [Message::OpenCapture(to_do)]);
+    assert_eq!(app.editing, None);
+    type_into(&mut app, Field::BoardName(board), &["Job"]);
+    send(&mut app, [Message::NewBoard]);
+    assert_eq!(app.editing, None);
+    assert_eq!(app.data.boards[0].name, "Job");
+    assert_eq!(column_names(&app), ["Backlog", "Now", "Shipped"]);
+
+    // Each rename was its own step.
+    send(&mut app, [ctrl("z", false), ctrl("z", false)]);
+    assert_eq!(app.data.boards[0].name, "Work");
+    assert_eq!(column_names(&app), ["Backlog", "Now", "Done"]);
+}
+
+#[test]
+fn the_idle_write_records_no_step() {
+    let mut app = app_with_board();
+    let board = app.data.boards[0].id;
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(5);
+
+    type_into(&mut app, Field::BoardName(board), &["Home"]);
+    send(
+        &mut app,
+        [
+            Message::EditTick(later),
+            Message::EditChanged("Homes".into()),
+            Message::CommitEdit,
+            ctrl("z", false),
+        ],
+    );
+
+    assert_eq!(app.data.boards[0].name, "Work");
+}
+
+#[test]
+fn the_capture_box_is_a_pending_edit_too() {
+    let mut app = app_with_board();
+    let to_do = column_id(&app, 0);
+
+    // Opening another field adds the typed Card and closes the box.
+    send(
+        &mut app,
+        [
+            Message::OpenCapture(to_do),
+            Message::CaptureChanged("Half typed".into()),
+            Message::StartEdit(Field::ColumnName(to_do)),
+        ],
+    );
+    assert_eq!(card_titles(&app, 0), ["Half typed"]);
+    assert_eq!(app.capture, None);
+    assert!(app.editing.is_some());
+
+    // Opening the capture box commits the rename; Ctrl+Z in it drops the typed text.
+    send(
+        &mut app,
+        [
+            Message::OpenCapture(to_do),
+            Message::CaptureChanged("Oops".into()),
+            ctrl("z", false),
+        ],
+    );
+    assert_eq!(card_titles(&app, 0), ["Half typed"]);
+    assert_eq!(app.capture, None);
+    assert!(app.editing.is_none());
+}

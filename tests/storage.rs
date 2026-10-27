@@ -200,3 +200,55 @@ fn save_retries_the_rename_while_another_process_holds_the_file() {
     release.join().unwrap();
     assert_eq!(storage::load(&dir).unwrap().unwrap().0, data);
 }
+
+// --- Text edits (#6) ---
+
+#[test]
+fn a_pending_rename_reaches_disk_one_idle_second_after_the_last_keystroke_and_on_close() {
+    use kanvibe::app::Field;
+    use std::time::{Duration, Instant};
+
+    let (_tmp, dir) = data_dir();
+    let mut app = App::open(dir.clone()).unwrap();
+    let saved_name = || {
+        storage::load(&dir).unwrap().unwrap().0.boards[0]
+            .name
+            .clone()
+    };
+    send(
+        &mut app,
+        [
+            Message::NewBoard,
+            Message::BoardNameChanged("Work".into()),
+            Message::CreateBoard,
+        ],
+    );
+    let board = Field::BoardName(app.data.boards[0].id);
+
+    send(
+        &mut app,
+        [
+            Message::StartEdit(board),
+            Message::EditChanged("Home".into()),
+            Message::EditTick(Instant::now()),
+        ],
+    );
+    assert_eq!(saved_name(), "Work", "not yet a second idle");
+
+    send(
+        &mut app,
+        [Message::EditTick(Instant::now() + Duration::from_secs(1))],
+    );
+    assert_eq!(saved_name(), "Home");
+    assert!(app.editing.is_some(), "still pending");
+
+    send(
+        &mut app,
+        [
+            Message::EditChanged("Homes".into()),
+            Message::CloseRequested,
+        ],
+    );
+    assert_eq!(saved_name(), "Homes");
+    assert_eq!(app.editing, None);
+}

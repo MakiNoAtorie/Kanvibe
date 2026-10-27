@@ -84,4 +84,36 @@ impl Data {
         });
         Some(id)
     }
+
+    /// The name of the Board or Column with this ID.
+    pub fn name(&self, id: Id) -> Option<&str> {
+        self.boards.iter().find_map(|b| {
+            if b.id == id {
+                return Some(b.name.as_str());
+            }
+            b.columns
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| c.name.as_str())
+        })
+    }
+
+    /// Renames the Board or Column with this ID to the trimmed name. A blank name changes nothing.
+    pub fn rename(&mut self, id: Id, name: &str) -> Option<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        let target = self.boards.iter_mut().find_map(|b| {
+            if b.id == id {
+                return Some(&mut b.name);
+            }
+            b.columns
+                .iter_mut()
+                .find(|c| c.id == id)
+                .map(|c| &mut c.name)
+        })?;
+        *target = name.into();
+        Some(())
+    }
 }

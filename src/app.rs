@@ -1,17 +1,23 @@
 //! The iced program: state, Message, `update` (the only place state changes) and `view`.
+use iced::widget::mouse_area;
 use iced::widget::{
     button, center, column, container, operation, row, scrollable, text, text_input,
 };
 use iced::{Element, Event, Fill, Subscription, Task, event, keyboard};
+use iced::{time, window};
 
 use crate::domain::{Board, Column, Data, Id};
 use crate::history::History;
 use crate::storage::{self, Settings};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use std::{fs, io};
 
 const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
+const EDIT_INPUT: &str = "edit";
+/// How long after the last keystroke a pending edit's live text is written to disk.
+const IDLE_WRITE: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -27,12 +33,41 @@ pub struct App {
     pub data_dir: Option<PathBuf>,
     /// What the data file last saved holds, so only changes are saved.
     pub saved: (Data, Settings),
+    /// The rename in progress. At most one text edit is pending: this or `capture`.
+    /// See `commit_pending`.
+    pub editing: Option<PendingEdit>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Capture {
     pub column: Id,
     pub text: String,
+}
+
+/// A text field whose edits go straight into the Boards and become one undo step on commit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Field {
+    BoardName(Id),
+    ColumnName(Id),
+}
+
+impl Field {
+    fn id(self) -> Id {
+        match self {
+            Field::BoardName(id) | Field::ColumnName(id) => id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingEdit {
+    pub field: Field,
+    /// The value when editing started; a blank text falls back to it.
+    pub start: String,
+    /// What the text box shows, as typed.
+    pub text: String,
+    /// The last keystroke not yet written to disk; saving waits until it is 1 s old.
+    pub typed_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +81,15 @@ pub enum Message {
     Escape,
     /// A key press not handled elsewhere; Ctrl+Z undoes, Ctrl+Y / Ctrl+Shift+Z redo.
     Key(keyboard::Event),
+    /// Double-click on a name: commits any pending edit and starts editing this field.
+    StartEdit(Field),
+    EditChanged(String),
+    /// Enter in a single-line field.
+    CommitEdit,
+    /// Timer while a pending edit has unwritten keystrokes; carries the current time.
+    EditTick(Instant),
+    /// The window's close button: commits the pending edit, saves, exits.
+    CloseRequested,
 }
 
 impl App {
@@ -53,6 +97,7 @@ impl App {
         self.history.sync(&self.data.boards);
         match message {
             Message::NewBoard => {
+                self.commit_pending();
                 self.board_name = Some(String::new());
                 return operation::focus(BOARD_NAME_INPUT);
             }
@@ -70,6 +115,7 @@ impl App {
                 }
             }
             Message::OpenCapture(column) => {
+                self.commit_pending();
                 self.capture = Some(Capture {
                     column,
                     text: String::new(),
@@ -82,19 +128,23 @@ impl App {
                 }
             }
             Message::SubmitCapture => {
-                if let Some(capture) = &mut self.capture {
-                    self.data.add_card(capture.column, &capture.text);
-                    capture.text.clear();
-                    let column = capture.column;
-                    let board = self.board_of_column(column);
-                    self.history.record(&self.data.boards, board, board);
+                if let Some(column) = self.capture.as_ref().map(|c| c.column) {
+                    self.commit_pending();
+                    self.capture = Some(Capture {
+                        column,
+                        text: String::new(),
+                    });
                 }
             }
             Message::Escape => {
                 self.board_name = None;
-                self.capture = None;
+                self.capture = None; // Esc discards the capture box; other fields commit.
+                self.commit_pending();
             }
             Message::Key(event) => {
+                if undo_shortcut(&event).is_some() {
+                    self.commit_pending();
+                }
                 if let Some((boards, show)) = match undo_shortcut(&event) {
                     Some(false) => self.history.undo(),
                     Some(true) => self.history.redo(),
@@ -106,8 +156,64 @@ impl App {
                     }
                 }
             }
+            Message::StartEdit(field) => {
+                self.commit_pending();
+                let id = field.id();
+                if let Some(start) = self.data.name(id) {
+                    self.editing = Some(PendingEdit {
+                        field,
+                        start: start.into(),
+                        text: start.into(),
+                        typed_at: None,
+                    });
+                    return operation::focus(EDIT_INPUT);
+                }
+            }
+            Message::EditChanged(text) => {
+                if let Some(edit) = &mut self.editing {
+                    let live = if text.trim().is_empty() {
+                        &edit.start
+                    } else {
+                        &text
+                    };
+                    self.data.rename(edit.field.id(), live);
+                    edit.text = text;
+                    edit.typed_at = Some(Instant::now());
+                }
+            }
+            Message::CommitEdit => self.commit_pending(),
+            Message::EditTick(now) => {
+                if let Some(edit) = &mut self.editing
+                    && edit.typed_at.is_some_and(|t| now >= t + IDLE_WRITE)
+                {
+                    edit.typed_at = None; // lets save_if_changed write the live text
+                }
+            }
+            Message::CloseRequested => {
+                self.commit_pending();
+                // ponytail: exits even if the save fails; #21 adds the Retry / Save a copy / Quit dialog.
+                return iced::exit();
+            }
         }
         Task::none()
+    }
+
+    /// Commits the text edit in progress, if any, as one undo step (none if nothing changed),
+    /// and closes its field. A Capture box adds its Card. Call it first in every arm that
+    /// changes domain data or UI context.
+    pub fn commit_pending(&mut self) {
+        if let Some(capture) = self.capture.take() {
+            self.data.add_card(capture.column, &capture.text);
+            let board = self.board_of_column(capture.column);
+            self.history.record(&self.data.boards, board, board);
+        }
+        if let Some(edit) = self.editing.take() {
+            let board = match edit.field {
+                Field::BoardName(_) => None,
+                Field::ColumnName(column) => self.board_of_column(column),
+            };
+            self.history.record(&self.data.boards, board, board);
+        }
     }
 
     fn board_of_column(&self, column: Id) -> Option<Id> {
@@ -122,14 +228,42 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> {
         // ponytail: Esc only, ignoring capture status (a focused text_input swallows Esc);
         // the key-mapping module replaces this.
-        event::listen_with(|event, _status, _window| match event {
+        let keys = event::listen_with(|event, _status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(keyboard::key::Named::Escape),
                 ..
             }) => Some(Message::Escape),
             Event::Keyboard(key) if undo_shortcut(&key).is_some() => Some(Message::Key(key)),
             _ => None,
-        })
+        });
+        Subscription::batch([keys, self.edit_subscription()])
+    }
+
+    /// Window close, and a timer while a pending edit has unwritten keystrokes.
+    fn edit_subscription(&self) -> Subscription<Message> {
+        let close = window::close_requests().map(|_| Message::CloseRequested);
+        let typing = self.editing.as_ref().is_some_and(|e| e.typed_at.is_some());
+        let tick = if typing {
+            time::every(IDLE_WRITE / 4).map(Message::EditTick)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([close, tick])
+    }
+
+    /// A name that turns into a text box on double-click, through the pending-edit model.
+    fn editable_name<'a>(&'a self, field: Field, name: &'a str, size: u32) -> Element<'a, Message> {
+        match &self.editing {
+            Some(edit) if edit.field == field => text_input("Name", &edit.text)
+                .id(EDIT_INPUT)
+                .size(size)
+                .on_input(Message::EditChanged)
+                .on_submit(Message::CommitEdit)
+                .into(),
+            _ => mouse_area(text(name).size(size))
+                .on_double_click(Message::StartEdit(field))
+                .into(),
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -147,7 +281,7 @@ impl App {
     fn view_board<'a>(&'a self, board: &'a Board) -> Element<'a, Message> {
         let columns = board.columns.iter().map(|c| self.view_column(c));
         column![
-            text(&board.name).size(20),
+            self.editable_name(Field::BoardName(board.id), &board.name, 20),
             scrollable(row(columns).spacing(12).height(Fill))
                 .horizontal()
                 .height(Fill),
@@ -178,7 +312,7 @@ impl App {
         };
         container(
             column![
-                text(&col.name),
+                self.editable_name(Field::ColumnName(col.id), &col.name, 16),
                 scrollable(column(cards).spacing(6)).height(Fill),
                 footer
             ]
@@ -255,6 +389,9 @@ impl App {
     /// Runs after every `update`.
     pub fn save_if_changed(&mut self) {
         let Some(dir) = &self.data_dir else { return };
+        if self.editing.as_ref().is_some_and(|e| e.typed_at.is_some()) {
+            return; // live text waits for the idle write (`EditTick`)
+        }
         let settings = Settings {
             last_board: self.current_board,
         };
@@ -293,5 +430,6 @@ pub fn run() -> iced::Result {
     iced::application(boot, update, App::view)
         .title("Kanvibe")
         .subscription(App::subscription)
+        .exit_on_close_request(false) // CloseRequested commits the pending edit first
         .run()
 }
