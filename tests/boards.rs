@@ -103,13 +103,13 @@ fn archive_is_one_undo_step() {
 
 #[test]
 fn a_restored_board_goes_to_the_bottom_of_the_active_list_in_one_undo_step() {
-    let (mut app, [a, _, c]) = app_with_boards();
+    let (mut app, [a, _, _]) = app_with_boards();
     send(&mut app, [Message::ArchiveBoard(a)]);
 
     send(&mut app, [Message::RestoreBoard(a)]);
     assert!(archived(&app).is_empty());
     assert_eq!(names(&app), ["B", "C", "A"]);
-    assert_eq!(app.current_board, Some(c), "restoring does not open it");
+    assert_eq!(app.current_board, Some(a), "restoring opens it");
 
     send(&mut app, [Message::Undo]);
     assert_eq!(archived(&app), ["A"]);
@@ -327,4 +327,31 @@ fn undoing_the_archive_of_the_last_open_board_opens_it_again() {
         Some(a),
         "restoring with nothing open opens it"
     );
+}
+
+#[test]
+fn archiving_shows_the_archived_section_and_restoring_opens_the_board() {
+    let (mut app, [a, b, c]) = app_with_boards();
+    assert!(!app.archived_open);
+    send(&mut app, [Message::ArchiveBoard(a)]);
+    assert!(app.archived_open, "the user sees where the Board went");
+    assert_eq!(app.current_board, Some(c));
+    let todo = app.data.boards.iter().find(|x| x.id == c).unwrap().columns[0].id;
+    send(
+        &mut app,
+        [
+            Message::OpenCapture(todo),
+            Message::CaptureChanged("Typed".into()),
+            Message::RestoreBoard(a),
+        ],
+    );
+    assert_eq!(app.current_board, Some(a));
+    assert_eq!(names(&app), ["B", "C", "A"]);
+    let c_board = app.data.boards.iter().find(|x| x.id == c).unwrap();
+    assert_eq!(
+        c_board.columns[0].cards.len(),
+        1,
+        "the Capture box was committed"
+    );
+    let _ = b;
 }

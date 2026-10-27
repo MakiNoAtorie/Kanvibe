@@ -848,6 +848,7 @@ impl App {
             Message::ArchiveBoard(board) => {
                 self.commit_pending();
                 if self.data.archive_board(board).is_some() {
+                    self.archived_open = true; // show where it went
                     self.record_step(None);
                 }
             }
@@ -901,6 +902,7 @@ impl App {
             Message::RestoreBoard(board) => {
                 self.commit_pending();
                 if self.data.restore_board(board).is_some() {
+                    self.current_board = Some(board);
                     self.record_step(None);
                 }
             }
