@@ -1,3 +1,3 @@
 fn main() -> iced::Result {
-    kanvibe::app::run()
+    kanvibe::startup::run()
 }

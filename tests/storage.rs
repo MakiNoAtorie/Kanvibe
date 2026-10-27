@@ -1,10 +1,11 @@
 //! Seam 2: storage against a temporary data folder, passed as `--data-dir` like the app gets it.
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use kanvibe::app::{App, Message};
 use kanvibe::domain::Data;
-use kanvibe::storage::{self, Settings};
+use kanvibe::startup::{self, Problem, Screen};
+use kanvibe::storage::{self, LoadError, Settings};
 
 /// A fresh temporary folder and the data folder the app resolves from `--data-dir <it>`.
 fn data_dir() -> (tempfile::TempDir, PathBuf) {
@@ -199,4 +200,261 @@ fn save_retries_the_rename_while_another_process_holds_the_file() {
 
     release.join().unwrap();
     assert_eq!(storage::load(&dir).unwrap().unwrap().0, data);
+}
+
+#[test]
+fn second_copy_cannot_take_the_lock_until_the_first_lets_go() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("Kanvibe");
+
+    let first = storage::lock(&dir).unwrap();
+    assert!(first.is_some(), "creates the folder and takes the lock");
+    assert!(storage::lock(&dir).unwrap().is_none());
+
+    drop(first);
+    assert!(storage::lock(&dir).unwrap().is_some());
+    assert!(dir.join("kanvibe.lock").exists());
+}
+
+#[test]
+fn newer_version_is_refused_and_the_file_left_alone() {
+    let (_tmp, dir) = data_dir();
+    let json = r#"{ "version": 2, "next_id": 1, "boards": [], "future": true }"#;
+    fs::write(dir.join("kanvibe.json"), json).unwrap();
+
+    assert!(matches!(storage::load(&dir), Err(LoadError::Newer)));
+    assert_eq!(fs::read_to_string(dir.join("kanvibe.json")).unwrap(), json);
+}
+
+#[test]
+fn content_errors_are_unreadable() {
+    let (_tmp, dir) = data_dir();
+    for json in [
+        "{ not json",
+        r#"{ "next_id": 1 }"#,
+        r#"{ "version": 1, "next_id": 1, "boards": [ { "id": "one" } ] }"#,
+    ] {
+        fs::write(dir.join("kanvibe.json"), json).unwrap();
+        let result = storage::load(&dir);
+        assert!(
+            matches!(result, Err(LoadError::Unreadable(_))),
+            "{json}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn missing_file_with_a_backup_is_unreadable_not_first_run() {
+    let (_tmp, dir) = data_dir();
+    fs::write(dir.join("kanvibe.json.bak2"), "anything").unwrap();
+
+    assert!(matches!(storage::load(&dir), Err(LoadError::Unreadable(_))));
+    assert!(!dir.join("kanvibe.json").exists());
+}
+
+/// A data file that can't be read at all (here: a folder in its place) is an I/O error,
+/// reported only after retrying for about a second.
+#[test]
+fn unreadable_file_system_entry_is_an_io_error_after_retrying() {
+    let (_tmp, dir) = data_dir();
+    fs::create_dir(dir.join("kanvibe.json")).unwrap();
+    let start = std::time::Instant::now();
+
+    assert!(matches!(storage::load(&dir), Err(LoadError::Io(_))));
+    assert!(start.elapsed() >= std::time::Duration::from_millis(900));
+}
+
+/// Saves `data` as the data file and copies it to `name`, the way backup rotation leaves it.
+fn backup(dir: &Path, name: &str, data: &Data) {
+    storage::save(dir, data, &Settings::default()).unwrap();
+    fs::rename(dir.join("kanvibe.json"), dir.join(name)).unwrap();
+}
+
+/// Names of the `kanvibe.json.corrupt-<timestamp>` files and their contents.
+fn corrupt_files(dir: &Path) -> Vec<(String, String)> {
+    let mut found: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            let name = p.file_name().unwrap().to_str().unwrap();
+            name.starts_with("kanvibe.json.corrupt-")
+        })
+        .map(|p| {
+            let name = p.file_name().unwrap().to_str().unwrap().to_owned();
+            (name, fs::read_to_string(&p).unwrap())
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn restore_offers_the_newest_readable_backup_and_none_when_none_is_readable() {
+    let (_tmp, dir) = data_dir();
+    assert!(storage::backup(&dir).is_none());
+
+    let older = sample();
+    let mut newer = sample();
+    newer.create_board("Newer");
+    backup(&dir, "kanvibe.json.bak2", &older);
+    backup(&dir, "kanvibe.json.bak1", &newer);
+    assert_eq!(
+        storage::backup(&dir).unwrap().0,
+        dir.join("kanvibe.json.bak1")
+    );
+
+    fs::write(dir.join("kanvibe.json.bak1"), "{ broken").unwrap();
+    assert_eq!(
+        storage::backup(&dir).unwrap().0,
+        dir.join("kanvibe.json.bak2")
+    );
+
+    fs::write(dir.join("kanvibe.json.bak2"), r#"{ "version": 9 }"#).unwrap();
+    assert!(storage::backup(&dir).is_none());
+}
+
+#[test]
+fn restore_moves_the_bad_file_aside_then_copies_the_newest_readable_backup_over_it() {
+    let (_tmp, dir) = data_dir();
+    let older = sample();
+    let mut newer = sample();
+    newer.create_board("Newer");
+    backup(&dir, "kanvibe.json.bak2", &older);
+    backup(&dir, "kanvibe.json.bak1", &newer);
+    fs::write(dir.join("kanvibe.json"), "{ broken").unwrap();
+
+    storage::restore(&dir).unwrap();
+
+    assert_eq!(storage::load(&dir).unwrap().unwrap().0, newer);
+    let corrupt = corrupt_files(&dir);
+    assert_eq!(corrupt.len(), 1);
+    assert_eq!(corrupt[0].1, "{ broken");
+    assert!(dir.join("kanvibe.json.bak1").exists(), "backups are kept");
+}
+
+#[test]
+fn restore_works_when_the_data_file_is_missing() {
+    let (_tmp, dir) = data_dir();
+    let data = sample();
+    backup(&dir, "kanvibe.json.bak1", &data);
+
+    storage::restore(&dir).unwrap();
+
+    assert_eq!(storage::load(&dir).unwrap().unwrap().0, data);
+    assert!(corrupt_files(&dir).is_empty());
+}
+
+#[test]
+fn start_empty_moves_the_bad_file_aside_and_keeps_older_corrupt_files() {
+    let (_tmp, dir) = data_dir();
+    let old = "kanvibe.json.corrupt-20200101T000000Z";
+    fs::write(dir.join(old), "old").unwrap();
+    fs::write(dir.join("kanvibe.json"), "{ broken").unwrap();
+
+    storage::start_empty(&dir).unwrap();
+
+    assert_eq!(storage::load(&dir).unwrap().unwrap().0, Data::default());
+    let corrupt = corrupt_files(&dir);
+    assert_eq!(corrupt.len(), 2);
+    assert_eq!(corrupt[0], (old.to_owned(), "old".to_owned()));
+    assert_eq!(corrupt[1].1, "{ broken");
+}
+
+/// The startup problem screen `Screen::open` shows, or `None` when the app opens.
+fn problem(screen: &Screen) -> Option<&Problem> {
+    match screen {
+        Screen::App(_) => None,
+        Screen::Problem(problem) => Some(problem),
+    }
+}
+
+fn opened(screen: Screen) -> App {
+    match screen {
+        Screen::App(app) => app,
+        Screen::Problem(problem) => panic!("expected the app, got {problem:?}"),
+    }
+}
+
+#[test]
+fn each_load_class_reaches_its_screen() {
+    let (_tmp, dir) = data_dir();
+    assert!(
+        opened(Screen::open(dir.clone())).data.boards.is_empty(),
+        "first run"
+    );
+
+    fs::write(dir.join("kanvibe.json"), r#"{ "version": 2 }"#).unwrap();
+    let screen = Screen::open(dir.clone());
+    assert!(matches!(problem(&screen).unwrap().error, LoadError::Newer));
+
+    fs::write(dir.join("kanvibe.json"), "{ broken").unwrap();
+    let screen = Screen::open(dir.clone());
+    let unreadable = problem(&screen).unwrap();
+    assert!(matches!(unreadable.error, LoadError::Unreadable(_)));
+    assert!(
+        unreadable.backup.is_none(),
+        "no Restore without a readable backup"
+    );
+
+    fs::remove_file(dir.join("kanvibe.json")).unwrap();
+    backup(&dir, "kanvibe.json.bak1", &sample());
+    let screen = Screen::open(dir.clone());
+    let missing = problem(&screen).unwrap();
+    assert!(matches!(missing.error, LoadError::Unreadable(_)));
+    assert_eq!(
+        missing.backup.as_ref().unwrap().0,
+        dir.join("kanvibe.json.bak1")
+    );
+
+    fs::create_dir(dir.join("kanvibe.json")).unwrap();
+    let mut screen = Screen::open(dir.clone());
+    assert!(matches!(problem(&screen).unwrap().error, LoadError::Io(_)));
+
+    fs::remove_dir(dir.join("kanvibe.json")).unwrap();
+    storage::save(&dir, &sample(), &Settings::default()).unwrap();
+    let _ = screen.update(startup::Message::Retry);
+    assert_eq!(opened(screen).data, sample(), "Retry loads again");
+}
+
+#[test]
+fn restore_and_start_empty_open_the_app() {
+    let (_tmp, dir) = data_dir();
+    backup(&dir, "kanvibe.json.bak1", &sample());
+    fs::write(dir.join("kanvibe.json"), "{ broken").unwrap();
+
+    let mut screen = Screen::open(dir.clone());
+    let _ = screen.update(startup::Message::Restore);
+    assert_eq!(opened(screen).data, sample());
+
+    fs::write(dir.join("kanvibe.json"), "{ broken again").unwrap();
+    let mut screen = Screen::open(dir.clone());
+    let _ = screen.update(startup::Message::StartEmpty);
+    assert_eq!(opened(screen).data, Data::default());
+    assert_eq!(corrupt_files(&dir).len(), 2);
+}
+
+/// An indexer or antivirus briefly holding the data file must not end in an error screen.
+#[cfg(windows)]
+#[test]
+fn load_retries_while_another_process_holds_the_file() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::time::Duration;
+
+    let (_tmp, dir) = data_dir();
+    let data = sample();
+    storage::save(&dir, &data, &Settings::default()).unwrap();
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(dir.join("kanvibe.json"))
+        .unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        drop(held);
+    });
+
+    let loaded = storage::load(&dir).unwrap().unwrap().0;
+
+    release.join().unwrap();
+    assert_eq!(loaded, data);
 }
