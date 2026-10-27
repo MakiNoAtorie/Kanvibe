@@ -36,6 +36,8 @@ pub struct App {
     /// The rename in progress. At most one text edit is pending: this or `capture`.
     /// See `commit_pending`.
     pub editing: Option<PendingEdit>,
+    /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
+    pub rotation: storage::Rotation,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -398,6 +400,9 @@ impl App {
         if self.saved.0 == self.data && self.saved.1 == settings {
             return;
         }
+        let changed = self.saved.0 != self.data;
+        let _ = storage::rotate(dir, &mut self.rotation, changed)
+            .map_err(|e| eprintln!("Backups not rotated: {e}"));
         match storage::save(dir, &self.data, &settings) {
             Ok(()) => self.saved = (self.data.clone(), settings),
             // ponytail: stderr only; #21 adds the "Not saved" bar, the background writer and retries.

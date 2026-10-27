@@ -13,6 +13,8 @@ const TMP: &str = "kanvibe.json.tmp";
 const LOCK: &str = "kanvibe.lock";
 const BACKUPS: [&str; 2] = ["kanvibe.json.bak1", "kanvibe.json.bak2"];
 const VERSION: u32 = 1;
+/// `.bak1` older than this is refreshed before any save.
+const STALE: Duration = Duration::from_secs(24 * 3600);
 
 /// App settings saved beside the Boards. Missing fields take defaults.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -81,6 +83,64 @@ pub fn save(dir: &Path, data: &Data, settings: &Settings) -> io::Result<()> {
     out.sync_all()?;
     drop(out);
     rename_with_retry(&tmp, &dir.join(FILE))
+}
+
+/// Where the session is in backup rotation. Held by whoever saves; see `rotate`.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum Rotation {
+    /// Nothing rotated yet this session.
+    #[default]
+    Due,
+    /// Rotated (or found nothing to back up) this session; only the 24 h rule applies.
+    Done,
+    /// The file didn't load cleanly, or was restored or started empty: rotating would push a
+    /// good backup out, so nothing rotates this session.
+    Off,
+}
+
+/// Rotates the two backups beside the data file, if due. Call before every save, with
+/// `data_changed` when the save changes Board data. Due on the session's first data-changing
+/// save, and before any save once `.bak1` is older than 24 h. Steps: data file to `.bak1.tmp`, delete `.bak2`, `.bak1` to `.bak2`, `.bak1.tmp` to
+/// `.bak1`. A failed rotation stays due, so the next save retries it.
+pub fn rotate(dir: &Path, rotation: &mut Rotation, data_changed: bool) -> io::Result<()> {
+    let [bak1, bak2] = BACKUPS.map(|b| dir.join(b));
+    let stale = || {
+        let modified = fs::metadata(&bak1).and_then(|m| m.modified()).ok();
+        modified.is_some_and(|m| m.elapsed().unwrap_or_default() > STALE)
+    };
+    if *rotation == Rotation::Off || !(*rotation == Rotation::Due && data_changed || stale()) {
+        return Ok(());
+    }
+    let tmp = dir.join(format!("{}.tmp", BACKUPS[0]));
+    let bytes = match fs::read(dir.join(FILE)) {
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            *rotation = Rotation::Done; // first run: nothing to back up
+            return Ok(());
+        }
+        result => result?,
+    };
+    if fs::read(&bak1).is_ok_and(|b| b == bytes) {
+        *rotation = Rotation::Done; // `.bak1` already holds it; rotating would only lose `.bak2`
+        return Ok(());
+    }
+    let mut out = fs::File::create(&tmp)?;
+    out.write_all(&bytes)?;
+    out.sync_all()?;
+    drop(out);
+    remove_if_exists(&bak2)?;
+    if bak1.try_exists()? {
+        rename_with_retry(&bak1, &bak2)?;
+    }
+    rename_with_retry(&tmp, &bak1)?;
+    *rotation = Rotation::Done;
+    Ok(())
+}
+
+fn remove_if_exists(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// Antivirus, indexers and sync tools briefly hold files open; retry the rename up to 10 times

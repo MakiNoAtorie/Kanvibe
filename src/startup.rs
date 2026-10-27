@@ -70,7 +70,14 @@ impl Screen {
                     _ => storage::start_empty(&dir),
                 };
                 *self = match fixed {
-                    Ok(()) => Screen::open(dir),
+                    // No backup rotation this session: the backups are what's left of the old file.
+                    Ok(()) => match Screen::open(dir) {
+                        Screen::App(app) => Screen::App(App {
+                            rotation: storage::Rotation::Off,
+                            ..app
+                        }),
+                        screen => screen,
+                    },
                     Err(e) => Screen::Problem(Problem {
                         dir,
                         error: LoadError::Io(e),

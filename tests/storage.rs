@@ -516,3 +516,164 @@ fn load_retries_while_another_process_holds_the_file() {
     release.join().unwrap();
     assert_eq!(loaded, data);
 }
+
+// Backup rotation (#20)
+
+fn create_board(app: &mut App, name: &str) {
+    send(
+        app,
+        [
+            Message::NewBoard,
+            Message::BoardNameChanged(name.into()),
+            Message::CreateBoard,
+        ],
+    );
+}
+
+/// The `kanvibe.json.bak*` files present (including any leftover `.tmp`), sorted.
+fn backups(dir: &Path) -> Vec<String> {
+    let mut found: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with("kanvibe.json.bak"))
+        .collect();
+    found.sort();
+    found
+}
+
+fn read(dir: &Path, name: &str) -> String {
+    fs::read_to_string(dir.join(name)).unwrap()
+}
+
+/// A data file the app opens without a settings change, so its first save changes Board data.
+fn saved_sample(dir: &Path) -> String {
+    let settings = Settings {
+        last_board: Some(sample().boards[0].id),
+    };
+    storage::save(dir, &sample(), &settings).unwrap();
+    read(dir, "kanvibe.json")
+}
+
+#[test]
+fn first_data_changing_save_of_a_session_rotates_and_later_saves_do_not() {
+    let (_tmp, dir) = data_dir();
+    let at_start = saved_sample(&dir);
+
+    let mut app = App::open(dir.clone()).unwrap();
+    create_board(&mut app, "Garden");
+    assert_eq!(backups(&dir), ["kanvibe.json.bak1"]);
+    assert_eq!(read(&dir, "kanvibe.json.bak1"), at_start);
+
+    create_board(&mut app, "Shed");
+    assert_eq!(backups(&dir), ["kanvibe.json.bak1"]);
+    assert_eq!(read(&dir, "kanvibe.json.bak1"), at_start);
+}
+
+#[test]
+fn first_run_has_nothing_to_back_up_for_the_whole_session() {
+    let (_tmp, dir) = data_dir();
+    let mut app = App::open(dir.clone()).unwrap();
+    create_board(&mut app, "Garden");
+    create_board(&mut app, "Shed");
+    assert!(backups(&dir).is_empty());
+
+    let mut app = App::open(dir.clone()).unwrap();
+    create_board(&mut app, "Attic");
+    assert_eq!(backups(&dir), ["kanvibe.json.bak1"], "next session rotates");
+}
+
+#[test]
+fn never_more_than_two_backups_across_sessions() {
+    let (_tmp, dir) = data_dir();
+    saved_sample(&dir);
+    let mut files = vec![];
+    for name in ["Garden", "Shed", "Attic", "Loft"] {
+        files.push(read(&dir, "kanvibe.json"));
+        let mut app = App::open(dir.clone()).unwrap();
+        create_board(&mut app, name);
+    }
+    assert_eq!(backups(&dir), ["kanvibe.json.bak1", "kanvibe.json.bak2"]);
+    assert_eq!(read(&dir, "kanvibe.json.bak1"), files[3]);
+    assert_eq!(read(&dir, "kanvibe.json.bak2"), files[2]);
+}
+
+#[test]
+fn skipped_when_the_data_file_is_identical_to_bak1() {
+    let (_tmp, dir) = data_dir();
+    let older = sample();
+    backup(&dir, "kanvibe.json.bak2", &older);
+    let at_start = saved_sample(&dir);
+    fs::write(dir.join("kanvibe.json.bak1"), &at_start).unwrap();
+    let bak2 = read(&dir, "kanvibe.json.bak2");
+
+    let mut app = App::open(dir.clone()).unwrap();
+    create_board(&mut app, "Garden");
+    create_board(&mut app, "Shed");
+
+    assert_eq!(read(&dir, "kanvibe.json.bak1"), at_start);
+    assert_eq!(read(&dir, "kanvibe.json.bak2"), bak2, ".bak2 is kept");
+}
+
+#[test]
+fn skipped_for_the_whole_session_after_restore_or_start_empty() {
+    for fix in [startup::Message::Restore, startup::Message::StartEmpty] {
+        let (_tmp, dir) = data_dir();
+        let mut older = sample();
+        older.create_board("Old");
+        backup(&dir, "kanvibe.json.bak2", &older);
+        backup(&dir, "kanvibe.json.bak1", &sample());
+        age(&dir, "kanvibe.json.bak1", 25);
+        let kept = [
+            read(&dir, "kanvibe.json.bak1"),
+            read(&dir, "kanvibe.json.bak2"),
+        ];
+        fs::write(dir.join("kanvibe.json"), "{ broken").unwrap();
+
+        let mut screen = Screen::open(dir.clone());
+        let _ = screen.update(fix.clone());
+        let mut app = opened(screen);
+        create_board(&mut app, "Garden");
+        create_board(&mut app, "Shed");
+
+        let now = [
+            read(&dir, "kanvibe.json.bak1"),
+            read(&dir, "kanvibe.json.bak2"),
+        ];
+        assert_eq!(now, kept, "{fix:?}");
+    }
+}
+
+fn age(dir: &Path, name: &str, hours: u64) {
+    let at = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
+    let file = fs::File::options()
+        .write(true)
+        .open(dir.join(name))
+        .unwrap();
+    file.set_modified(at).unwrap();
+}
+
+#[test]
+fn any_save_rotates_again_once_bak1_is_older_than_24_hours() {
+    let (_tmp, dir) = data_dir();
+    let at_start = saved_sample(&dir);
+    let mut app = App::open(dir.clone()).unwrap();
+    create_board(&mut app, "Garden");
+
+    age(&dir, "kanvibe.json.bak1", 23);
+    create_board(&mut app, "Shed");
+    assert_eq!(backups(&dir), ["kanvibe.json.bak1"], "23 h is not stale");
+
+    age(&dir, "kanvibe.json.bak1", 25);
+    let before = read(&dir, "kanvibe.json");
+    create_board(&mut app, "Attic");
+    assert_eq!(backups(&dir), ["kanvibe.json.bak1", "kanvibe.json.bak2"]);
+    assert_eq!(read(&dir, "kanvibe.json.bak1"), before);
+    assert_eq!(read(&dir, "kanvibe.json.bak2"), at_start);
+
+    create_board(&mut app, "Loft");
+    assert_eq!(
+        read(&dir, "kanvibe.json.bak1"),
+        before,
+        "the new .bak1 is fresh"
+    );
+}
