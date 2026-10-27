@@ -980,3 +980,24 @@ fn any_save_rotates_again_once_bak1_is_older_than_24_hours() {
         "the new .bak1 is fresh"
     );
 }
+
+#[test]
+fn an_unreadable_bak1_is_replaced_without_pushing_the_good_bak2_out() {
+    let (_tmp, dir) = data_dir();
+    let mut older = sample();
+    older.create_board("Old");
+    backup(&dir, "kanvibe.json.bak2", &older);
+    let bak2 = read(&dir, "kanvibe.json.bak2");
+    let at_start = saved_sample(&dir);
+    fs::write(dir.join("kanvibe.json.bak1"), "{ broken").unwrap();
+
+    let mut app = App::open(dir.clone()).unwrap();
+    create_board(&mut app, "Garden");
+
+    assert_eq!(read(&dir, "kanvibe.json.bak1"), at_start);
+    assert_eq!(
+        read(&dir, "kanvibe.json.bak2"),
+        bak2,
+        "the readable backup is kept"
+    );
+}
