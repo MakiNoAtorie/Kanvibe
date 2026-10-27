@@ -486,11 +486,11 @@ fn the_picker_closes_when_the_panel_closes_or_follows_another_card() {
 }
 
 #[test]
-fn chips_cut_names_at_12_characters() {
+fn chips_cut_names_past_12_characters_with_an_ellipsis() {
     assert_eq!(labels::chip_text("Short"), "Short");
     assert_eq!(labels::chip_text("123456789012"), "123456789012");
-    assert_eq!(labels::chip_text("1234567890123"), "123456789012");
-    assert_eq!(labels::chip_text("ééééééééééééé"), "éééééééééééé");
+    assert_eq!(labels::chip_text("1234567890123"), "12345678901…");
+    assert_eq!(labels::chip_text("ééééééééééééé"), "ééééééééééé…");
 }
 
 #[test]

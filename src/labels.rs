@@ -39,9 +39,12 @@ pub fn swatch(key: &str) -> Color {
         .map_or(PALETTE[0].1, |(_, c)| *c)
 }
 
-/// A chip's text: the Label name cut at 12 characters.
+/// A chip's text: the Label name; past 12 characters, its first 11 and "…".
 pub fn chip_text(name: &str) -> String {
-    name.chars().take(12).collect()
+    match name.chars().nth(12) {
+        Some(_) => name.chars().take(11).chain(['…']).collect(),
+        None => name.into(),
+    }
 }
 
 /// "Delete Label "X"? It is on N Cards." for a Label on at least one Card; `None` otherwise.
