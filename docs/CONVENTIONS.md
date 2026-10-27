@@ -118,6 +118,13 @@
 - `Data::move_to_board(card, board)` (Label match by trimmed lowercase name; target colour wins; missing Label appended; "To do" created when no Columns). `src/move_board.rs`: `App.move_picker`, `OpenMove` (M / panel button), `CloseMove`, `MoveToBoard(card, board)`; `validate_move` in `validate_ui`. Cross-Board history: `record(boards, Some(source), Some(target))`.
 - `App::selection_after_leaving(card)` (archive.rs) for any action that makes a selected Card leave; then clear `panel` if it showed that Card.
 
+## Load repair (#22, `src/repair.rs`)
+- `repair::repair(Data) -> (Data, bool)` is the one place for load repairs (pure; bool = changed); import calls it too. New invariants go there. Lenient field readers are `pub(crate)` fns in repair.rs used via `deserialize_with` (e.g. `repair::limit`).
+- `storage::open(dir) -> Result<Option<Loaded { data, settings, repaired }>, LoadError>`; `storage::load` drops `repaired`. `App::open` sets `Rotation::Off` when repaired. Settings are not repaired (`Data::fallback` handles `last_board`).
+- Duplicate IDs: first holder keeps it, later ones get fresh IDs; references stay on the first holder. Blank-name defaults: Board "Untitled", Column "New column", Card "Untitled", Label "Label".
+- Migration: pre-migration copy `kanvibe.v<old>.json` written at load with `create_new`; real migrations go in `storage::parse` before `FileIn`.
+- Tests: `tests/repair.rs` helpers `write(json)`, `load_repaired(json)`, `opened(screen)`.
+
 ## Esc order (current)
 - cancel drag → shortcuts overlay → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Archive view → panel → (filter) → selection.
 
