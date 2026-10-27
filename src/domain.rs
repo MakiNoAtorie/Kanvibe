@@ -58,6 +58,9 @@ pub struct Card {
     /// When the Card's own fields last changed (not when neighbouring Cards shift).
     #[serde(default)]
     pub updated: String,
+    /// Markdown (ADR 0003); empty when the Card has none.
+    #[serde(default)]
+    pub description: String,
 }
 
 /// The current time as an RFC 3339 UTC string with second precision.
@@ -200,6 +203,7 @@ impl Data {
             title: title.into(),
             created: now.clone(),
             updated: now,
+            description: String::new(),
         });
         Some(id)
     }
@@ -246,6 +250,19 @@ impl Data {
         if let Some(card) = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card) {
             card.updated = now();
         }
+    }
+
+    /// The Card's Markdown description.
+    pub fn description(&self, card: Id) -> Option<&str> {
+        self.card(card).map(|c| c.description.as_str())
+    }
+
+    /// Replaces the Card's description as typed. Does not touch `updated`: the caller does on commit.
+    pub fn set_description(&mut self, card: Id, text: &str) -> Option<()> {
+        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
+        let card = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card)?;
+        card.description = text.into();
+        Some(())
     }
 
     /// The name of the Board or Column, or the title of the Card, with this ID.

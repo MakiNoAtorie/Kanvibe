@@ -8,10 +8,12 @@ use iced::widget::{opaque, stack};
 use iced::{Center, Element, Event, Fill, Subscription, Task, event, keyboard};
 use iced::{Theme, time, window};
 
+use crate::description;
 use crate::domain::{Board, Column, Data, Id};
 use crate::history::History;
 use crate::keys::{self, Context, Input};
 use crate::storage::{self, Settings};
+use iced::widget::text_editor;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -67,6 +69,10 @@ pub struct App {
     pub panel: Option<Id>,
     /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
     pub rotation: storage::Rotation,
+    /// The description editor's text and cursor while `Field::Description` is pending.
+    pub editor: text_editor::Content,
+    /// The open Card's description as last parsed for the rendered view: (source, parsed).
+    pub rendered: (String, iced::widget::markdown::Content),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,12 +140,17 @@ pub enum Field {
     BoardName(Id),
     ColumnName(Id),
     CardTitle(Id),
+    /// The Card's Markdown description, in the panel's description editor.
+    Description(Id),
 }
 
 impl Field {
     fn id(self) -> Id {
         match self {
-            Field::BoardName(id) | Field::ColumnName(id) | Field::CardTitle(id) => id,
+            Field::BoardName(id)
+            | Field::ColumnName(id)
+            | Field::CardTitle(id)
+            | Field::Description(id) => id,
         }
     }
 }
@@ -228,6 +239,16 @@ pub enum Message {
     ClosePanel,
     /// F2: edit the open Card's title.
     EditTitle,
+    /// E or the panel's Edit button: open the description editor.
+    EditDescription,
+    /// Typing, cursor moves and clicks in the description editor.
+    DescriptionAction(text_editor::Action),
+    /// Ctrl+B / Ctrl+I / Ctrl+K in the description editor.
+    Format(description::Markup),
+    /// A link clicked in the rendered description; only http, https and mailto open.
+    OpenLink(String),
+    /// A click no widget took while the description editor is open: leave the editor.
+    ClickOutside,
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -245,6 +266,7 @@ impl App {
         );
         let task = self.apply(message);
         self.validate_ui(board, &order);
+        self.refresh_rendered();
         task
     }
 
@@ -340,6 +362,23 @@ impl App {
                 self.commit_pending();
                 self.panel = None;
             }
+            Message::EditDescription => {
+                if let Some(card) = self.panel {
+                    return self.update(Message::StartEdit(Field::Description(card)));
+                }
+            }
+            Message::DescriptionAction(action) => self.description_action(action),
+            Message::Format(markup) => self.format(markup),
+            Message::OpenLink(url) => description::open_link(&url),
+            Message::ClickOutside => {
+                if self
+                    .editing
+                    .as_ref()
+                    .is_some_and(|e| matches!(e.field, Field::Description(_)))
+                {
+                    self.commit_pending();
+                }
+            }
             Message::EditTitle => {
                 if let Some(card) = self.panel {
                     return self.update(Message::StartEdit(Field::CardTitle(card)));
@@ -395,6 +434,7 @@ impl App {
                         (BOARD_NAME_INPUT, Input::BoardName),
                         (CAPTURE_INPUT, Input::Capture),
                         (EDIT_INPUT, Input::Edit),
+                        (description::EDITOR, Input::Edit),
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
                     ]
                     .into_iter()
@@ -409,14 +449,25 @@ impl App {
                 self.commit_pending();
                 self.board_menu = false;
                 let id = field.id();
-                if let Some(start) = self.data.name(id) {
+                let start = match field {
+                    Field::Description(card) => self.data.description(card),
+                    _ => self.data.name(id),
+                };
+                if let Some(start) = start.map(String::from) {
+                    let focus = match field {
+                        Field::Description(_) => {
+                            self.editor = text_editor::Content::with_text(&start);
+                            description::EDITOR
+                        }
+                        _ => EDIT_INPUT,
+                    };
                     self.editing = Some(PendingEdit {
                         field,
-                        start: start.into(),
-                        text: start.into(),
+                        text: start.clone(),
+                        start,
                         typed_at: None,
                     });
-                    return operation::focus(EDIT_INPUT);
+                    return operation::focus(focus);
                 }
             }
             Message::EditChanged(text) => {
@@ -595,6 +646,12 @@ impl App {
             let board = match edit.field {
                 Field::BoardName(_) => None,
                 Field::ColumnName(column) => self.board_of_column(column),
+                Field::Description(card) => {
+                    if self.data.description(card) != Some(edit.start.as_str()) {
+                        self.data.touch(card);
+                    }
+                    self.board_of_card(card)
+                }
                 Field::CardTitle(card) => {
                     if self.data.name(card) != Some(edit.start.as_str()) {
                         self.data.touch(card); // a changed title is the Card's own change
@@ -792,6 +849,8 @@ impl App {
             Some(card) => row![container(content).width(Fill), self.view_panel(card)].into(),
             None => content,
         };
+        // Clicks no widget took: leaving the description editor by clicking outside it.
+        let content: Element<_> = mouse_area(content).on_press(Message::ClickOutside).into();
         let content: Element<_> = match &self.not_saved {
             Some(error) => column![
                 container(text(error))
@@ -883,14 +942,18 @@ impl App {
                 column: col.id,
                 card: Some(card.id),
             });
-            let card_box = container(text(&card.title))
-                .id(card_widget(card.id))
-                .width(Fill)
-                .padding(8)
-                .style(outlined(
-                    container::bordered_box,
-                    selection.is_some_and(|s| s.card == Some(card.id)),
-                ));
+            let card_box = container(
+                row![text(&card.title).width(Fill)]
+                    .extend(description::face_icon(card))
+                    .spacing(6),
+            )
+            .id(card_widget(card.id))
+            .width(Fill)
+            .padding(8)
+            .style(outlined(
+                container::bordered_box,
+                selection.is_some_and(|s| s.card == Some(card.id)),
+            ));
             mouse_area(card_box).on_press(select).into()
         });
         let footer: Element<_> = match &self.capture {

@@ -1,4 +1,5 @@
 pub mod app;
+pub mod description;
 pub mod domain;
 pub mod history;
 pub mod keys;
