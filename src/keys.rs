@@ -54,6 +54,11 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
     if typing {
         return None;
     }
+    match key {
+        Key::Named(Named::Enter) if !ctrl => return Some(Message::OpenPanel),
+        Key::Named(Named::F2) => return Some(Message::EditTitle),
+        _ => {}
+    }
     let direction = match key {
         Key::Named(Named::ArrowLeft) => Direction::Left,
         Key::Named(Named::ArrowRight) => Direction::Right,
