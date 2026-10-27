@@ -1,19 +1,25 @@
 //! The iced program: state, Message, `update` (the only place state changes) and `view`.
+use iced::widget::mouse_area;
+use iced::widget::{self, selector};
 use iced::widget::{
-    self, button, center, column, container, mouse_area, operation, row, scrollable, selector,
-    text, text_input,
+    button, center, column, container, operation, row, scrollable, text, text_input,
 };
-use iced::{Element, Event, Fill, Subscription, Task, Theme, event, keyboard};
+use iced::{Element, Event, Fill, Subscription, Task, event, keyboard};
+use iced::{Theme, time, window};
 
 use crate::domain::{Board, Column, Data, Id};
 use crate::history::History;
-use crate::keys::{self, Context, Field};
+use crate::keys::{self, Context, Input};
 use crate::storage::{self, Settings};
+use std::fs;
 use std::path::PathBuf;
-use std::{fs, io};
+use std::time::{Duration, Instant};
 
 const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
+const EDIT_INPUT: &str = "edit";
+/// How long after the last keystroke a pending edit's live text is written to disk.
+const IDLE_WRITE: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -29,6 +35,9 @@ pub struct App {
     pub data_dir: Option<PathBuf>,
     /// What the data file last saved holds, so only changes are saved.
     pub saved: (Data, Settings),
+    /// The rename in progress. At most one text edit is pending: this or `capture`.
+    /// See `commit_pending`.
+    pub editing: Option<PendingEdit>,
     /// The selected Column and, optionally, a Card in it; both outlined.
     pub selection: Option<Selection>,
 }
@@ -39,18 +48,44 @@ pub struct Selection {
     pub card: Option<Id>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Capture {
-    pub column: Id,
-    pub text: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Left,
     Right,
     Up,
     Down,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Capture {
+    pub column: Id,
+    pub text: String,
+}
+
+/// A text field whose edits go straight into the Boards and become one undo step on commit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Field {
+    BoardName(Id),
+    ColumnName(Id),
+}
+
+impl Field {
+    fn id(self) -> Id {
+        match self {
+            Field::BoardName(id) | Field::ColumnName(id) => id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingEdit {
+    pub field: Field,
+    /// The value when editing started; a blank text falls back to it.
+    pub start: String,
+    /// What the text box shows, as typed.
+    pub text: String,
+    /// The last keystroke not yet written to disk; saving waits until it is 1 s old.
+    pub typed_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,6 +111,15 @@ pub enum Message {
     Key(keyboard::Event),
     /// A key press plus the focused widget, if any; mapped by [`keys::map`].
     KeyWithFocus(keyboard::Event, Option<selector::Target>),
+    /// Double-click on a name: commits any pending edit and starts editing this field.
+    StartEdit(Field),
+    EditChanged(String),
+    /// Enter in a single-line field.
+    CommitEdit,
+    /// Timer while a pending edit has unwritten keystrokes; carries the current time.
+    EditTick(Instant),
+    /// The window's close button: commits the pending edit, saves, exits.
+    CloseRequested,
 }
 
 impl App {
@@ -83,6 +127,7 @@ impl App {
         self.history.sync(&self.data.boards);
         match message {
             Message::NewBoard => {
+                self.commit_pending();
                 self.board_name = Some(String::new());
                 return operation::focus(BOARD_NAME_INPUT);
             }
@@ -101,6 +146,7 @@ impl App {
                 }
             }
             Message::OpenCapture(column) => {
+                self.commit_pending();
                 self.capture = Some(Capture {
                     column,
                     text: String::new(),
@@ -113,27 +159,23 @@ impl App {
                 }
             }
             Message::SubmitCapture => {
-                if let Some(capture) = &mut self.capture {
-                    let card = self.data.add_card(capture.column, &capture.text);
-                    capture.text.clear();
-                    let column = capture.column;
-                    if card.is_some() {
-                        self.selection = Some(Selection { column, card });
-                    }
-                    let board = self.board_of_column(column);
-                    self.history.record(&self.data.boards, board, board);
-                    if card.is_some() {
-                        return self.reveal_selection();
-                    }
+                if let Some(column) = self.capture.as_ref().map(|c| c.column) {
+                    self.commit_pending();
+                    self.capture = Some(Capture {
+                        column,
+                        text: String::new(),
+                    });
+                    return self.reveal_selection();
                 }
             }
             Message::Escape => {
-                if self.board_name.is_some() || self.capture.is_some() {
-                    self.board_name = None;
-                    self.capture = None;
-                } else {
+                // One layer per press: the text field, then the selection.
+                if self.board_name.is_none() && self.capture.is_none() && self.editing.is_none() {
                     self.selection = None;
                 }
+                self.board_name = None;
+                self.capture = None; // Esc discards the capture box; other fields commit.
+                self.commit_pending();
             }
             Message::NewCard => {
                 let column = self
@@ -146,16 +188,19 @@ impl App {
                 }
             }
             Message::Select(selection) => {
+                self.commit_pending();
                 self.selection = Some(selection);
                 return self.reveal_selection();
             }
             Message::MoveSelection(direction) => {
+                self.commit_pending();
                 if let Some(board) = self.board() {
                     self.selection = moved(board, self.selection, direction).or(self.selection);
                 }
                 return self.reveal_selection();
             }
             Message::MoveCard(direction) => {
+                self.commit_pending();
                 let target = self.board().zip(self.selection);
                 if let Some((card, column, index)) =
                     target.and_then(|(board, selection)| card_move(board, selection, direction))
@@ -171,6 +216,7 @@ impl App {
                 }
             }
             Message::Undo | Message::Redo => {
+                self.commit_pending();
                 let step = match message {
                     Message::Undo => self.history.undo(),
                     _ => self.history.redo(),
@@ -188,22 +234,98 @@ impl App {
                     .map(move |focused| Message::KeyWithFocus(event.clone(), focused));
             }
             Message::KeyWithFocus(event, focused) => {
-                let id = |name| Some(widget::Id::new(name));
-                let focused = focused.and_then(|target| match target {
-                    selector::Target::Focusable { id: f, .. } if f == id(BOARD_NAME_INPUT) => {
-                        Some(Field::BoardName)
-                    }
-                    selector::Target::Focusable { id: f, .. } if f == id(CAPTURE_INPUT) => {
-                        Some(Field::Capture)
-                    }
-                    _ => None,
-                });
+                let input = |target: selector::Target| {
+                    let selector::Target::Focusable { id: Some(id), .. } = target else {
+                        return None;
+                    };
+                    [
+                        (BOARD_NAME_INPUT, Input::BoardName),
+                        (CAPTURE_INPUT, Input::Capture),
+                        (EDIT_INPUT, Input::Edit),
+                    ]
+                    .into_iter()
+                    .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
+                };
+                let focused = focused.and_then(input);
                 if let Some(message) = keys::map(&event, &Context { focused }) {
                     return self.update(message);
                 }
             }
+            Message::StartEdit(field) => {
+                self.commit_pending();
+                let id = field.id();
+                if let Some(start) = self.data.name(id) {
+                    self.editing = Some(PendingEdit {
+                        field,
+                        start: start.into(),
+                        text: start.into(),
+                        typed_at: None,
+                    });
+                    return operation::focus(EDIT_INPUT);
+                }
+            }
+            Message::EditChanged(text) => {
+                if let Some(edit) = &mut self.editing {
+                    let live = if text.trim().is_empty() {
+                        &edit.start
+                    } else {
+                        &text
+                    };
+                    self.data.rename(edit.field.id(), live);
+                    edit.text = text;
+                    edit.typed_at = Some(Instant::now());
+                }
+            }
+            Message::CommitEdit => self.commit_pending(),
+            Message::EditTick(now) => {
+                if let Some(edit) = &mut self.editing
+                    && edit.typed_at.is_some_and(|t| now >= t + IDLE_WRITE)
+                {
+                    edit.typed_at = None; // lets save_if_changed write the live text
+                }
+            }
+            Message::CloseRequested => {
+                self.commit_pending();
+                // ponytail: exits even if the save fails; #21 adds the Retry / Save a copy / Quit dialog.
+                return iced::exit();
+            }
         }
         Task::none()
+    }
+
+    /// Commits the text edit in progress, if any, as one undo step (none if nothing changed),
+    /// and closes its field. A Capture box adds its Card. Call it first in every arm that
+    /// changes domain data or UI context.
+    pub fn commit_pending(&mut self) {
+        if let Some(capture) = self.capture.take() {
+            if let Some(card) = self.data.add_card(capture.column, &capture.text) {
+                self.selection = Some(Selection {
+                    column: capture.column,
+                    card: Some(card),
+                }); // new Cards become the selected Card
+            }
+            let board = self.board_of_column(capture.column);
+            self.history.record(&self.data.boards, board, board);
+        }
+        if let Some(edit) = self.editing.take() {
+            let board = match edit.field {
+                Field::BoardName(_) => None,
+                Field::ColumnName(column) => self.board_of_column(column),
+            };
+            self.history.record(&self.data.boards, board, board);
+        }
+    }
+
+    /// Scrolls the selected Column fully into view, and its Card into view within it.
+    fn reveal_selection(&self) -> Task<Message> {
+        let Some(s) = self.selection else {
+            return Task::none();
+        };
+        let column = reveal(BOARD_SCROLL.into(), column_widget(s.column), true);
+        let card = s.card.map_or(Task::none(), |card| {
+            reveal(cards_widget(s.column), card_widget(card), false)
+        });
+        Task::batch([column, card])
     }
 
     /// Keeps the selection on the current Board: it follows its Card to another Column and is
@@ -228,18 +350,6 @@ impl App {
         });
     }
 
-    /// Scrolls the selected Column fully into view, and its Card into view within it.
-    fn reveal_selection(&self) -> Task<Message> {
-        let Some(s) = self.selection else {
-            return Task::none();
-        };
-        let column = reveal(BOARD_SCROLL.into(), column_widget(s.column), true);
-        let card = s.card.map_or(Task::none(), |card| {
-            reveal(cards_widget(s.column), card_widget(card), false)
-        });
-        Task::batch([column, card])
-    }
-
     /// The current Board.
     fn board(&self) -> Option<&Board> {
         let id = self.current_board?;
@@ -256,13 +366,12 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(|event, status, _window| match (event, status) {
+        let keys = event::listen_with(|event, status, _window| match (event, status) {
             (Event::Keyboard(key @ keyboard::Event::KeyPressed { .. }), event::Status::Ignored) => {
                 Some(Message::Key(key))
             }
-            // A focused text_input captures Esc and only unfocuses; this is the "leave the
-            // text field" layer of Esc, so the capture box / name prompt close on one press.
-            // ponytail: any captured Esc closes them; a field that must survive Esc needs its own check.
+            // A focused text_input captures Esc and only unfocuses; sending Escape for it is the
+            // "leave the text field" layer, so a field closes (or commits) on one press.
             (
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(keyboard::key::Named::Escape),
@@ -271,7 +380,35 @@ impl App {
                 event::Status::Captured,
             ) => Some(Message::Escape),
             _ => None,
-        })
+        });
+        Subscription::batch([keys, self.edit_subscription()])
+    }
+
+    /// Window close, and a timer while a pending edit has unwritten keystrokes.
+    fn edit_subscription(&self) -> Subscription<Message> {
+        let close = window::close_requests().map(|_| Message::CloseRequested);
+        let typing = self.editing.as_ref().is_some_and(|e| e.typed_at.is_some());
+        let tick = if typing {
+            time::every(IDLE_WRITE / 4).map(Message::EditTick)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([close, tick])
+    }
+
+    /// A name that turns into a text box on double-click, through the pending-edit model.
+    fn editable_name<'a>(&'a self, field: Field, name: &'a str, size: u32) -> Element<'a, Message> {
+        match &self.editing {
+            Some(edit) if edit.field == field => text_input("Name", &edit.text)
+                .id(EDIT_INPUT)
+                .size(size)
+                .on_input(Message::EditChanged)
+                .on_submit(Message::CommitEdit)
+                .into(),
+            _ => mouse_area(text(name).size(size))
+                .on_double_click(Message::StartEdit(field))
+                .into(),
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -289,7 +426,7 @@ impl App {
     fn view_board<'a>(&'a self, board: &'a Board) -> Element<'a, Message> {
         let columns = board.columns.iter().map(|c| self.view_column(c));
         column![
-            text(&board.name).size(20),
+            self.editable_name(Field::BoardName(board.id), &board.name, 20),
             scrollable(row(columns).spacing(12).height(Fill))
                 .id(BOARD_SCROLL)
                 .horizontal()
@@ -330,7 +467,7 @@ impl App {
         };
         let column_box = container(
             column![
-                text(&col.name),
+                self.editable_name(Field::ColumnName(col.id), &col.name, 16),
                 scrollable(column(cards).spacing(6))
                     .id(cards_widget(col.id))
                     .height(Fill),
@@ -510,8 +647,8 @@ fn position(board: &Board, selection: Selection) -> Option<(usize, Option<usize>
 
 impl App {
     /// Loads the data folder (created if missing) and reopens the last open Board, else the first.
-    pub fn open(dir: PathBuf) -> io::Result<App> {
-        fs::create_dir_all(&dir)?;
+    pub fn open(dir: PathBuf) -> Result<App, storage::LoadError> {
+        fs::create_dir_all(&dir).map_err(storage::LoadError::Io)?;
         let (data, settings) = storage::load(&dir)?.unwrap_or_default();
         let current_board = settings
             .last_board
@@ -530,6 +667,9 @@ impl App {
     /// Runs after every `update`.
     pub fn save_if_changed(&mut self) {
         let Some(dir) = &self.data_dir else { return };
+        if self.editing.as_ref().is_some_and(|e| e.typed_at.is_some()) {
+            return; // live text waits for the idle write (`EditTick`)
+        }
         let settings = Settings {
             last_board: self.current_board,
         };
@@ -543,30 +683,4 @@ impl App {
             Err(e) => eprintln!("Not saved: {}: {e}", dir.display()),
         }
     }
-}
-
-pub fn run() -> iced::Result {
-    let Some(dir) = storage::data_dir(std::env::args().skip(1)) else {
-        eprintln!("No local app data folder; pass --data-dir <path>");
-        std::process::exit(1);
-    };
-    // ponytail: a load error exits so the bad file is never overwritten; #19 adds the problem screens.
-    let app = match App::open(dir.clone()) {
-        Ok(app) => app,
-        Err(e) => {
-            eprintln!("Can't open {}: {e}", dir.display());
-            std::process::exit(1);
-        }
-    };
-    let app = std::cell::Cell::new(Some(app));
-    let boot = move || app.take().expect("iced boots once");
-    let update = |app: &mut App, message| {
-        let task = app.update(message);
-        app.save_if_changed();
-        task
-    };
-    iced::application(boot, update, App::view)
-        .title("Kanvibe")
-        .subscription(App::subscription)
-        .run()
 }

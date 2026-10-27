@@ -8,14 +8,17 @@ use crate::app::{Direction, Message};
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Context {
     /// The text field that has keyboard focus, if any.
-    pub focused: Option<Field>,
+    pub focused: Option<Input>,
 }
 
-/// The app's text fields.
+/// The app's text boxes (one widget Id each).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Field {
+pub enum Input {
+    /// The new-Board name prompt.
     BoardName,
     Capture,
+    /// The box of the pending edit (`app::Field`): a rename, later titles and the like.
+    Edit,
 }
 
 /// Maps a key press to the Message it stands for. iced only delivers keys the focused widget

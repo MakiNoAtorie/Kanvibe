@@ -1,7 +1,7 @@
 //! The key mapping as a pure function: (key event, context) -> optional Message.
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use kanvibe::app::{Direction, Message};
-use kanvibe::keys::{self, Context, Field};
+use kanvibe::keys::{self, Context, Input};
 
 fn press(key: Key, modifiers: Modifiers) -> keyboard::Event {
     use keyboard::key::{Code, Physical};
@@ -39,7 +39,7 @@ fn letter(c: &str, modifiers: Modifiers) -> keyboard::Event {
 
 const NOTHING_FOCUSED: Context = Context { focused: None };
 const CAPTURE_FOCUSED: Context = Context {
-    focused: Some(Field::Capture),
+    focused: Some(Input::Capture),
 };
 
 #[test]
