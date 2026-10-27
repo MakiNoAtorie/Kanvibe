@@ -35,6 +35,15 @@ impl Filter {
             self.labels.is_empty() || card.labels.iter().any(|l| self.labels.contains(l));
         text_ok && labels_ok
     }
+
+    /// `Column::count_label`, prefixed with "visible of " while the Filter is on.
+    pub(crate) fn count_label(&self, column: &Column, shown: impl Fn(&Card) -> bool) -> String {
+        if !self.is_on() {
+            return column.count_label();
+        }
+        let visible = column.cards.iter().filter(|c| shown(c)).count();
+        format!("{visible} of {}", column.count_label())
+    }
 }
 
 /// The drop gap under a Filter for the slot before `cards[slot]` (`cards.len()` = below them
@@ -174,11 +183,7 @@ impl App {
     /// The Column header count: `Column::count_label`, prefixed with "visible of " while the
     /// Filter is on. The Column Limit stays judged on the total (`Column::over_limit`).
     pub fn count_label(&self, column: &Column) -> String {
-        if !self.filter.is_on() {
-            return column.count_label();
-        }
-        let visible = column.cards.iter().filter(|c| self.shown(c)).count();
-        format!("{visible} of {}", column.count_label())
+        self.filter.count_label(column, |c| self.shown(c))
     }
 
     /// Run after every update: filter Labels that are not the current Board's are dropped.

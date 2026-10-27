@@ -93,6 +93,8 @@ pub struct App {
     pub rendered: (String, iced::widget::markdown::Content),
     /// A message over the dimmed app with only OK (an import refused, an export failed).
     pub notice: Option<String>,
+    /// "Save as image…" is running (Save dialog or rendering); the menu item reads "Saving image…".
+    pub saving_image: bool,
     /// The Filter on the current Board; never saved. See `filter`.
     pub filter: Filter,
     /// Cards created while the Filter is on: shown even when they don't match.
@@ -357,6 +359,10 @@ pub enum Message {
     ExportBoard(Id),
     /// `None` when the Save dialog was cancelled; `Err` holds the message to show.
     Exported(Option<Result<(), String>>),
+    /// "Save as image…" in the Board's ⋯ menu: the size check, the Save dialog, then the PNG.
+    SaveImage(Id),
+    /// `None` when the Save dialog was cancelled; `Err` holds the message to show.
+    ImageSaved(Option<Result<(), String>>),
     /// "Import Board…" in the sidebar footer: the native Open dialog, then the file is read.
     ImportBoard,
     /// The picked file's bytes; `None` when the dialog was cancelled, `Err` when it can't be read.
@@ -602,6 +608,7 @@ impl App {
             | Message::Exported(_)
             | Message::ImportBoard
             | Message::Imported(_) => return self.update_transfer(message),
+            Message::SaveImage(_) | Message::ImageSaved(_) => return self.update_image(message),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -1374,6 +1381,12 @@ impl App {
                 button("Export Board…")
                     .style(button::secondary)
                     .on_press(Message::ExportBoard(board.id)),
+                button(match self.saving_image {
+                    true => "Saving image…",
+                    false => "Save as image…",
+                })
+                .style(button::secondary)
+                .on_press_maybe((!self.saving_image).then_some(Message::SaveImage(board.id))),
                 button("Archive Board")
                     .style(button::secondary)
                     .on_press(Message::ArchiveBoard(board.id)),
@@ -1408,24 +1421,12 @@ impl App {
         // Hidden Cards are skipped but keep their index: drop slots are positions in all Cards.
         let shown = col.cards.iter().enumerate().filter(|(_, c)| self.shown(c));
         let cards = shown.map(|(i, card)| {
-            let chips = self.board().and_then(|b| labels::chips(b, card));
-            let card_box = container(
-                column![
-                    row![text(&card.title).width(Fill)]
-                        .extend(description::face_icon(card))
-                        .spacing(6)
-                ]
-                .spacing(4)
-                .extend(chips)
-                .extend(card.progress().map(|p| text(p).size(12).into())),
-            )
-            .id(card_widget(card.id))
-            .width(Fill)
-            .padding(8)
-            .style(outlined(
-                container::bordered_box,
-                selection.is_some_and(|s| s.card == Some(card.id)),
-            ));
+            let card_box = card_face(self.board(), card)
+                .id(card_widget(card.id))
+                .style(outlined(
+                    container::bordered_box,
+                    selection.is_some_and(|s| s.card == Some(card.id)),
+                ));
             // Indicator above, padding below: Card slots touch, so no gap between them
             // falls through to the Column body.
             let slot = container(column![drag::indicator(gap == Some(i)), card_box].spacing(2))
@@ -1539,6 +1540,27 @@ impl App {
         };
         center(content).into()
     }
+}
+
+/// A Card's face, unstyled: title row (+ description icon), Label chips, Checklist progress.
+/// Shared by the Board view and the image export.
+pub(crate) fn card_face<'a>(
+    board: Option<&'a Board>,
+    card: &'a Card,
+) -> container::Container<'a, Message> {
+    let chips = board.and_then(|b| labels::chips(b, card));
+    container(
+        column![
+            row![text(&card.title).width(Fill)]
+                .extend(description::face_icon(card))
+                .spacing(6)
+        ]
+        .spacing(4)
+        .extend(chips)
+        .extend(card.progress().map(|p| text(p).size(12).into())),
+    )
+    .width(Fill)
+    .padding(8)
 }
 
 /// A confirmation: the question, Cancel (as Esc) and the confirm button.

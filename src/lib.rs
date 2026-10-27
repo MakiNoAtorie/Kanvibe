@@ -7,6 +7,7 @@ pub mod domain;
 pub mod drag;
 pub mod filter;
 pub mod history;
+pub mod image;
 pub mod keys;
 pub mod labels;
 pub mod move_board;
