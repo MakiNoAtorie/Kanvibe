@@ -48,6 +48,14 @@
 - Feature-area tests may get their own file (`tests/columns.rs`) with local helpers to avoid conflicts in `tests/update.rs`.
 - iced: no `push_maybe`; use `column![..].extend(option)` and `.chain([...])`.
 
+## Saving (#21)
+- `App::save_if_changed() -> Option<SaveJob>` runs after every `update` and never writes; it returns `None` while a pending edit has unwritten keystrokes or a write is in flight. `SaveJob::run(self) -> Message::Saved(Result<(), String>)` is the one place a save happens (backup rotation hooks there or in `storage::save`). `Screen::update` runs jobs on a `std::thread`.
+- App fields: `writing`, `failed` (held from retry until a change or `RetrySave`), `not_saved` (bar text, built by `fn not_saved(path, io::Error)`), `closing: Closing::{No, Waiting, Asking, Exiting}`.
+- Messages `Saved`, `RetrySave` (10 s timer + Retry button), `SaveCopy`, `CopySaved(Option<Result<(), String>>)` (`None` = dialog cancelled), `QuitWithoutSaving`. Arms that don't change domain data must not call `commit_pending`.
+- Settings for a save come from private `App::settings()`; theme, sidebar, window go there.
+- Overlays: `stack![content, opaque(center(panel).style(dim))]`, as in `view_close_dialog`.
+- Storage tests: `send` runs `while let Some(job) = app.save_if_changed() { app.update(job.run()) }`; `send_while_writing` holds a job; `block_saves(dir)` (a folder named `kanvibe.json.tmp`) forces a failure.
+
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.

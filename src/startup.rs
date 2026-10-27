@@ -56,8 +56,21 @@ impl Screen {
         match (&mut *self, message) {
             (Screen::App(app), Message::App(message)) => {
                 let task = app.update(message).map(Message::App);
-                app.save_if_changed();
-                return task;
+                let Some(job) = app.save_if_changed() else {
+                    return task;
+                };
+                // The background writer: a thread per save, one in flight at a time (see
+                // `save_if_changed`), so the UI never waits on the disk.
+                let (done, result) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = done.send(job.run()); // receiver gone only if the app quit
+                });
+                let saved = Task::perform(result, |result| {
+                    Message::App(result.unwrap_or(app::Message::Saved(Err(
+                        "Not saved: the writer stopped".into(),
+                    ))))
+                });
+                return Task::batch([task, saved]);
             }
             (_, Message::Quit) => return iced::exit(),
             (Screen::Problem(problem), Message::Retry) => {

@@ -4,6 +4,7 @@ use iced::widget::{self, selector};
 use iced::widget::{
     button, center, column, container, operation, row, scrollable, text, text_input, tooltip,
 };
+use iced::widget::{opaque, stack};
 use iced::{Center, Element, Event, Fill, Subscription, Task, event, keyboard};
 use iced::{Theme, time, window};
 
@@ -21,6 +22,8 @@ const EDIT_INPUT: &str = "edit";
 const LIMIT_INPUT: &str = "limit";
 /// How long after the last keystroke a pending edit's live text is written to disk.
 const IDLE_WRITE: Duration = Duration::from_secs(1);
+/// How often a failed save is retried while nothing changes.
+const RETRY: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -45,6 +48,13 @@ pub struct App {
     pub limit_input: Option<LimitInput>,
     /// The selected Column and, optionally, a Card in it; both outlined.
     pub selection: Option<Selection>,
+    /// The state the background writer is saving; `Some` while a save is in flight.
+    pub writing: Option<(Data, Settings)>,
+    /// The state whose save failed. Not retried until something changes or `RetrySave`.
+    pub failed: Option<(Data, Settings)>,
+    /// The persistent bar: "Not saved: <path>: <OS error>". Cleared by a successful save.
+    pub not_saved: Option<String>,
+    pub closing: Closing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +75,39 @@ pub enum Direction {
 pub struct LimitInput {
     pub column: Id,
     pub text: String,
+}
+
+/// The window close: the app waits for the save, asks when it fails, then exits.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum Closing {
+    #[default]
+    No,
+    /// Close requested; waiting for the save in flight.
+    Waiting,
+    /// The save failed: the dialog asks Retry / Save a copy as… / Quit without saving.
+    Asking,
+    /// `iced::exit()` returned.
+    Exiting,
+}
+
+/// A save for the background writer. Its result comes back as `Message::Saved`.
+#[derive(Debug)]
+pub struct SaveJob {
+    dir: PathBuf,
+    data: Data,
+    settings: Settings,
+}
+
+impl SaveJob {
+    /// Writes the data file, blocking. The one place the app performs a save.
+    pub fn run(self) -> Message {
+        let saved = storage::save(&self.dir, &self.data, &self.settings);
+        Message::Saved(saved.map_err(|e| not_saved(&storage::file_path(&self.dir), e)))
+    }
+}
+
+fn not_saved(path: &std::path::Path, e: std::io::Error) -> String {
+    format!("Not saved: {}: {e}", path.display())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +182,15 @@ pub enum Message {
     OpenLimit(Id),
     LimitChanged(String),
     SubmitLimit,
+    /// The background writer finished; `Err` holds the "Not saved" bar text.
+    Saved(Result<(), String>),
+    /// The 10 s timer while not saved, or Retry in the close dialog: try the failed save again.
+    RetrySave,
+    /// "Save a copy as…" in the close dialog: the native Save dialog, then the copy is written.
+    SaveCopy,
+    /// `None` when the Save dialog was cancelled; `Err` holds the "Not saved" bar text.
+    CopySaved(Option<Result<(), String>>),
+    QuitWithoutSaving,
 }
 
 impl App {
@@ -187,6 +239,7 @@ impl App {
                     return self.reveal_selection();
                 }
             }
+            Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape => {
                 // One layer per press: the text field, then the selection.
                 if self.board_name.is_none()
@@ -313,7 +366,50 @@ impl App {
             }
             Message::CloseRequested => {
                 self.commit_pending();
-                // ponytail: exits even if the save fails; #21 adds the Retry / Save a copy / Quit dialog.
+                self.failed = None; // closing is a save trigger: try again now
+                self.closing = Closing::Waiting;
+                return self.exit_if_saved();
+            }
+            Message::Saved(result) => {
+                let attempted = self.writing.take();
+                match result {
+                    Ok(()) => {
+                        self.saved = attempted.unwrap_or_default();
+                        self.not_saved = None;
+                        return self.exit_if_saved();
+                    }
+                    Err(e) => {
+                        self.failed = attempted;
+                        self.not_saved = Some(e);
+                        if self.closing == Closing::Waiting {
+                            self.closing = Closing::Asking;
+                        }
+                    }
+                }
+            }
+            Message::RetrySave => {
+                self.failed = None;
+                if self.closing == Closing::Asking {
+                    self.closing = Closing::Waiting;
+                }
+            }
+            Message::SaveCopy => {
+                let (data, settings) = (self.data.clone(), self.settings());
+                let pick = rfd::AsyncFileDialog::new()
+                    .set_file_name("kanvibe.json")
+                    .add_filter("Kanvibe data", &["json"])
+                    .save_file();
+                return Task::perform(
+                    async move {
+                        let path = pick.await?.path().to_owned();
+                        let saved = storage::save_copy(&path, &data, &settings);
+                        Some(saved.map_err(|e| not_saved(&path, e)))
+                    },
+                    Message::CopySaved,
+                );
+            }
+            Message::CopySaved(Some(Ok(()))) | Message::QuitWithoutSaving => {
+                self.closing = Closing::Exiting;
                 return iced::exit();
             }
             Message::AddColumn(board) => {
@@ -351,6 +447,8 @@ impl App {
                     self.history.record(&self.data.boards, board, board);
                 }
             }
+            Message::CopySaved(Some(Err(e))) => self.not_saved = Some(e),
+            Message::CopySaved(None) => {}
         }
         Task::none()
     }
@@ -451,7 +549,15 @@ impl App {
             ) => Some(Message::Escape),
             _ => None,
         });
-        Subscription::batch([keys, self.edit_subscription()])
+        Subscription::batch([keys, self.edit_subscription(), self.retry_subscription()])
+    }
+
+    /// Every 10 s while the last save failed.
+    fn retry_subscription(&self) -> Subscription<Message> {
+        match self.not_saved {
+            Some(_) => time::every(RETRY).map(|_| Message::RetrySave),
+            None => Subscription::none(),
+        }
     }
 
     /// Window close, and a timer while a pending edit has unwritten keystrokes.
@@ -491,7 +597,7 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        match self
+        let content = match self
             .data
             .boards
             .iter()
@@ -499,7 +605,48 @@ impl App {
         {
             Some(board) => self.view_board(board),
             None => self.view_empty(),
+        };
+        let content: Element<_> = match &self.not_saved {
+            Some(error) => column![
+                container(text(error))
+                    .width(Fill)
+                    .padding(8)
+                    .style(container::danger),
+                content
+            ]
+            .into(),
+            None => content,
+        };
+        match self.closing {
+            Closing::Asking | Closing::Waiting if self.not_saved.is_some() => {
+                stack![content, self.view_close_dialog()].into()
+            }
+            _ => content,
         }
+    }
+
+    /// Retry / Save a copy as… / Quit without saving, over the dimmed app.
+    /// The buttons wait while a save is in flight, so exit never cuts one off.
+    fn view_close_dialog(&self) -> Element<'_, Message> {
+        let idle = |message| self.writing.is_none().then_some(message);
+        let buttons = row![
+            button("Retry").on_press_maybe(idle(Message::RetrySave)),
+            button("Save a copy as…").on_press_maybe(idle(Message::SaveCopy)),
+            button("Quit without saving").on_press_maybe(idle(Message::QuitWithoutSaving)),
+        ]
+        .spacing(8);
+        let panel = column![
+            text("Your changes are not saved").size(20),
+            text(self.not_saved.as_deref().unwrap_or_default()),
+            buttons
+        ]
+        .spacing(12)
+        .max_width(560);
+        let dim = |_: &iced::Theme| container::Style {
+            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+            ..Default::default()
+        };
+        opaque(center(container(panel).padding(20).style(container::rounded_box)).style(dim))
     }
 
     fn view_board<'a>(&'a self, board: &'a Board) -> Element<'a, Message> {
@@ -781,24 +928,47 @@ impl App {
         })
     }
 
-    /// Saves the data file if the Boards or settings differ from what it holds.
-    /// Runs after every `update`.
-    pub fn save_if_changed(&mut self) {
-        let Some(dir) = &self.data_dir else { return };
-        if self.editing.as_ref().is_some_and(|e| e.typed_at.is_some()) {
-            return; // live text waits for the idle write (`EditTick`)
+    /// A save of the current state for the background writer, if the Boards or settings differ
+    /// from what the data file holds. Runs after every `update`, never inside it.
+    /// `None` while a save is in flight: its `Saved` result runs this again, so changes made
+    /// meanwhile merge into one save of the latest state.
+    pub fn save_if_changed(&mut self) -> Option<SaveJob> {
+        let dir = self.data_dir.clone()?;
+        if self.writing.is_some() || self.editing.as_ref().is_some_and(|e| e.typed_at.is_some()) {
+            return None; // live text waits for the idle write (`EditTick`)
         }
-        let settings = Settings {
+        let state = (self.data.clone(), self.settings());
+        if state == self.saved {
+            self.not_saved = None; // e.g. undone back to what the file holds
+            return None;
+        }
+        if self.failed.as_ref() == Some(&state) {
+            return None; // wait for a change or the retry timer
+        }
+        self.writing = Some(state.clone());
+        let (data, settings) = state;
+        Some(SaveJob {
+            dir,
+            data,
+            settings,
+        })
+    }
+
+    /// Exits once a requested close has nothing left to save and no save in flight;
+    /// otherwise the next `save_if_changed` starts the save and its `Saved` comes back here.
+    fn exit_if_saved(&mut self) -> Task<Message> {
+        let clean = self.saved.0 == self.data && self.saved.1 == self.settings();
+        if self.closing != Closing::Waiting || self.writing.is_some() || !clean {
+            return Task::none();
+        }
+        self.closing = Closing::Exiting;
+        iced::exit()
+    }
+
+    /// The settings saved beside the Boards.
+    fn settings(&self) -> Settings {
+        Settings {
             last_board: self.current_board,
-        };
-        if self.saved.0 == self.data && self.saved.1 == settings {
-            return;
-        }
-        match storage::save(dir, &self.data, &settings) {
-            Ok(()) => self.saved = (self.data.clone(), settings),
-            // ponytail: stderr only; #21 adds the "Not saved" bar, the background writer and retries.
-            // Keeping `saved` stale makes the next update retry.
-            Err(e) => eprintln!("Not saved: {}: {e}", dir.display()),
         }
     }
 }
