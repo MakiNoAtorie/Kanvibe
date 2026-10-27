@@ -1,0 +1,3 @@
+# Single JSON file for storage
+
+All data lives in one JSON file (`%LOCALAPPDATA%\Kanvibe\kanvibe.json`, not Roaming: on domain machines Roaming can be redirected to a file server, which would turn every save into a network write), rewritten whole on every change via write-to-temp-then-rename. Settings (theme, window geometry, last Board) live in the same file but window geometry never triggers a save on its own. Kanvibe is single-user, single-machine and fully offline, and the data is small, so SQLite's concurrency, partial writes and querying buy nothing here, while JSON stays human-readable and diffable. Revisit if data grows past roughly 10k Cards or saving becomes noticeably slow.

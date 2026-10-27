@@ -1,0 +1,3 @@
+# Markdown for Card descriptions
+
+Card descriptions are rich text, stored and edited as Markdown: the editor colour-codes the markup as you type (iced's highlighter gives colours plus bold/italic in a monospace font, no heading sizes, no strikethrough while editing), `Ctrl+B` / `Ctrl+I` / `Ctrl+K` wrap the selection, and the description renders fully formatted when not being edited. iced's `text_editor` is plain-text only, so true WYSIWYG editing would mean building a custom editor from scratch, which is weeks of work and the riskiest part of the app. Markdown also keeps the data file human-readable and diffable.
