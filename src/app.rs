@@ -5,6 +5,7 @@ use iced::widget::{
 use iced::{Element, Event, Fill, Subscription, Task, event, keyboard};
 
 use crate::domain::{Board, Column, Data, Id};
+use crate::history::History;
 
 const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
@@ -17,6 +18,8 @@ pub struct App {
     pub board_name: Option<String>,
     /// The Capture box; at most one is open.
     pub capture: Option<Capture>,
+    /// Undo history of the Boards; in memory only.
+    pub history: History,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,10 +37,13 @@ pub enum Message {
     CaptureChanged(String),
     SubmitCapture,
     Escape,
+    /// A key press not handled elsewhere; Ctrl+Z undoes, Ctrl+Y / Ctrl+Shift+Z redo.
+    Key(keyboard::Event),
 }
 
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        self.history.sync(&self.data.boards);
         match message {
             Message::NewBoard => {
                 self.board_name = Some(String::new());
@@ -53,6 +59,7 @@ impl App {
                 if let Some(id) = self.data.create_board(name) {
                     self.current_board = Some(id);
                     self.board_name = None;
+                    self.history.record(&self.data.boards, None, None);
                 }
             }
             Message::OpenCapture(column) => {
@@ -71,14 +78,38 @@ impl App {
                 if let Some(capture) = &mut self.capture {
                     self.data.add_card(capture.column, &capture.text);
                     capture.text.clear();
+                    let column = capture.column;
+                    let board = self.board_of_column(column);
+                    self.history.record(&self.data.boards, board, board);
                 }
             }
             Message::Escape => {
                 self.board_name = None;
                 self.capture = None;
             }
+            Message::Key(event) => {
+                if let Some((boards, show)) = match undo_shortcut(&event) {
+                    Some(false) => self.history.undo(),
+                    Some(true) => self.history.redo(),
+                    None => None,
+                } {
+                    self.data.boards = boards;
+                    if show.is_some() {
+                        self.current_board = show;
+                    }
+                }
+            }
         }
         Task::none()
+    }
+
+    fn board_of_column(&self, column: Id) -> Option<Id> {
+        let board = self
+            .data
+            .boards
+            .iter()
+            .find(|b| b.columns.iter().any(|c| c.id == column))?;
+        Some(board.id)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -89,6 +120,7 @@ impl App {
                 key: keyboard::Key::Named(keyboard::key::Named::Escape),
                 ..
             }) => Some(Message::Escape),
+            Event::Keyboard(key) if undo_shortcut(&key).is_some() => Some(Message::Key(key)),
             _ => None,
         })
     }
@@ -169,6 +201,28 @@ impl App {
                 .into(),
         };
         center(content).into()
+    }
+}
+
+/// `Some(false)` for Ctrl+Z (undo), `Some(true)` for Ctrl+Y or Ctrl+Shift+Z (redo).
+// ponytail: the key-mapping function (#7) takes this over.
+fn undo_shortcut(event: &keyboard::Event) -> Option<bool> {
+    let keyboard::Event::KeyPressed {
+        key,
+        physical_key,
+        modifiers,
+        ..
+    } = event
+    else {
+        return None;
+    };
+    if !modifiers.command() {
+        return None;
+    }
+    match key.to_latin(*physical_key)? {
+        'z' => Some(modifiers.shift()),
+        'y' => Some(true),
+        _ => None,
     }
 }
 
