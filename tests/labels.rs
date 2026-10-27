@@ -403,7 +403,7 @@ fn escape_backs_out_confirm_then_picker_then_panel() {
 }
 
 #[test]
-fn l_opens_the_picker_only_with_the_panel_open() {
+fn l_opens_the_picker_only_with_a_card_open_or_selected() {
     let press = |app: &mut App| {
         let event = keyboard::Event::KeyPressed {
             key: Key::Character("l".into()),
@@ -420,6 +420,7 @@ fn l_opens_the_picker_only_with_the_panel_open() {
     };
     let mut app = app_with_cards();
     app.panel = None;
+    app.selection = None;
     press(&mut app);
     assert!(app.label_picker.is_none());
     let a = card(&app, "A");

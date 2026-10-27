@@ -211,7 +211,7 @@ impl App {
         let card = self.label_picker.as_ref().map(|p| p.card);
         match message {
             Message::OpenLabels => {
-                if let Some(card) = self.panel {
+                if let Some(card) = self.open_panel() {
                     self.label_picker = Some(LabelPicker {
                         card,
                         expanded: None,

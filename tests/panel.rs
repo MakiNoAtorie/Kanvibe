@@ -333,3 +333,34 @@ fn timestamps_show_in_local_time() {
     );
     assert_eq!(panel::local_time("garbage", &tz), "garbage");
 }
+
+#[test]
+fn f2_e_and_l_open_the_panel_on_the_selected_card() {
+    use kanvibe::app::PendingEdit;
+    let mut app = app_with_cards();
+    click(&mut app, "B");
+    send(&mut app, [Message::Escape]); // closes the panel, keeps the selection
+    assert_eq!(app.panel, None);
+    let b = card(&app, "B");
+    send(&mut app, [Message::EditTitle]);
+    assert_eq!(app.panel, Some(b));
+    assert!(matches!(
+        app.editing,
+        Some(PendingEdit {
+            field: Field::CardTitle(id),
+            ..
+        }) if id == b
+    ));
+    send(&mut app, [Message::Escape, Message::Escape]);
+    send(&mut app, [Message::EditDescription]);
+    assert_eq!(app.panel, Some(b));
+    assert!(matches!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(Field::Description(id)) if id == b
+    ));
+    send(&mut app, [Message::Escape, Message::Escape]);
+    assert_eq!(app.panel, None);
+    send(&mut app, [Message::OpenLabels]);
+    assert_eq!(app.panel, Some(b));
+    assert_eq!(app.label_picker.as_ref().map(|p| p.card), Some(b));
+}

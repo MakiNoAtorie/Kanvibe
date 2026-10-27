@@ -496,14 +496,14 @@ impl App {
             }
             Message::OpenPanel => {
                 self.commit_pending();
-                self.panel = self.selection.and_then(|s| s.card).or(self.panel);
+                self.open_panel();
             }
             Message::ClosePanel => {
                 self.commit_pending();
                 self.panel = None;
             }
             Message::EditDescription => {
-                if let Some(card) = self.panel {
+                if let Some(card) = self.open_panel() {
                     return self.update(Message::StartEdit(Field::Description(card)));
                 }
             }
@@ -520,7 +520,7 @@ impl App {
                 }
             }
             Message::EditTitle => {
-                if let Some(card) = self.panel {
+                if let Some(card) = self.open_panel() {
                     return self.update(Message::StartEdit(Field::CardTitle(card)));
                 }
             }
@@ -965,6 +965,12 @@ impl App {
         };
         self.data.move_card(card, column, index);
         self.record_step(self.data.board_of_column(column));
+    }
+
+    /// Shows the selected Card in the panel (else keeps the open one) and returns it.
+    pub(crate) fn open_panel(&mut self) -> Option<Id> {
+        self.panel = self.selection.and_then(|s| s.card).or(self.panel);
+        self.panel
     }
 
     /// Records an undo step (if anything changed) that shows `board` on undo and on redo;
