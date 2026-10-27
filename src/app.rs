@@ -1077,6 +1077,10 @@ impl App {
                 }
                 Field::LabelName(label) => self.data.board_of_label(label),
                 Field::Description(card) => {
+                    if edit.text.trim().is_empty() {
+                        // Whitespace only is no description: "" is the one rule everywhere.
+                        self.data.set_description(card, "");
+                    }
                     if self.data.description(card) != Some(edit.start.as_str()) {
                         self.data.touch(card);
                     }
