@@ -83,6 +83,17 @@ pub fn save(dir: &Path, data: &Data, settings: &Settings) -> io::Result<()> {
     rename_with_retry(&tmp, &dir.join(FILE))
 }
 
+/// "Save a copy as…": the data file's contents written to `path`, which the user picked.
+pub fn save_copy(path: &Path, data: &Data, settings: &Settings) -> io::Result<()> {
+    let file = FileOut {
+        version: VERSION,
+        next_id: data.next_id,
+        settings,
+        boards: &data.boards,
+    };
+    fs::write(path, serde_json::to_vec_pretty(&file)?)
+}
+
 /// Antivirus, indexers and sync tools briefly hold files open; retry the rename up to 10 times
 /// with 50–200 ms backoff on sharing or access errors.
 fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {

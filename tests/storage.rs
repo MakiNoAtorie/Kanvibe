@@ -2,7 +2,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use kanvibe::app::{App, Message};
+use kanvibe::app::{App, Closing, Message};
 use kanvibe::domain::Data;
 use kanvibe::startup::{self, Problem, Screen};
 use kanvibe::storage::{self, LoadError, Settings};
@@ -45,11 +45,14 @@ fn round_trip_keeps_boards_columns_cards_and_next_id_pretty_printed() {
     assert!(text.starts_with("{\n  \"version\": 1,\n"), "{text}");
 }
 
-/// What the iced update function does: `update`, then save if anything changed.
+/// What the iced update function does: `update`, then start a save if anything changed. Here
+/// the background writer's job runs at once and its result goes back through `update`.
 fn send(app: &mut App, messages: impl IntoIterator<Item = Message>) {
     for message in messages {
         let _ = app.update(message);
-        app.save_if_changed();
+        while let Some(job) = app.save_if_changed() {
+            let _ = app.update(job.run());
+        }
     }
 }
 
@@ -515,4 +518,251 @@ fn load_retries_while_another_process_holds_the_file() {
 
     release.join().unwrap();
     assert_eq!(loaded, data);
+}
+
+// --- Save failure (#21) ---
+
+/// A folder where the save writes its temporary file makes every save fail at once with an OS
+/// error. Made after `App::open`, which deletes a leftover `.tmp`.
+fn block_saves(dir: &Path) {
+    fs::create_dir(dir.join("kanvibe.json.tmp")).unwrap();
+}
+
+fn unblock_saves(dir: &Path) {
+    fs::remove_dir(dir.join("kanvibe.json.tmp")).unwrap();
+}
+
+fn create_board(app: &mut App, name: &str) {
+    send(
+        app,
+        [
+            Message::NewBoard,
+            Message::BoardNameChanged(name.into()),
+            Message::CreateBoard,
+        ],
+    );
+}
+
+fn add_card(app: &mut App, title: &str) {
+    let todo = app.data.boards[0].columns[0].id;
+    send(
+        app,
+        [
+            Message::OpenCapture(todo),
+            Message::CaptureChanged(title.into()),
+            Message::SubmitCapture,
+        ],
+    );
+}
+
+#[test]
+fn a_failed_save_keeps_the_change_shows_the_bar_and_retries_on_the_next_change() {
+    let (_tmp, dir) = data_dir();
+    let mut app = App::open(dir.clone()).unwrap();
+    block_saves(&dir);
+
+    create_board(&mut app, "Work");
+
+    assert_eq!(app.data.boards[0].name, "Work", "kept in memory");
+    assert!(!dir.join("kanvibe.json").exists());
+    let bar = app.not_saved.clone().expect("the Not saved bar");
+    let prefix = format!("Not saved: {}: ", dir.join("kanvibe.json").display());
+    assert!(
+        bar.starts_with(&prefix) && bar.len() > prefix.len(),
+        "{bar}"
+    );
+
+    unblock_saves(&dir);
+    assert!(
+        app.save_if_changed().is_none(),
+        "no retry until a change or the timer"
+    );
+
+    add_card(&mut app, "Call Ann");
+
+    assert_eq!(app.not_saved, None, "the bar clears on success");
+    assert_eq!(storage::load(&dir).unwrap().unwrap().0, app.data);
+}
+
+/// `update` without running the save it starts: the writer is still busy.
+fn send_while_writing(app: &mut App, messages: impl IntoIterator<Item = Message>) {
+    for message in messages {
+        let _ = app.update(message);
+        assert!(app.save_if_changed().is_none(), "one save in flight");
+    }
+}
+
+#[test]
+fn changes_during_a_write_merge_into_one_save_of_the_latest_state() {
+    let (_tmp, dir) = data_dir();
+    let mut app = App::open(dir.clone()).unwrap();
+    create_board(&mut app, "Work");
+    let todo = app.data.boards[0].columns[0].id;
+    let _ = app.update(Message::OpenCapture(todo));
+    let _ = app.update(Message::CaptureChanged("A".into()));
+    let _ = app.update(Message::SubmitCapture);
+    let first = app.save_if_changed().expect("a save starts");
+
+    send_while_writing(
+        &mut app,
+        [
+            Message::CaptureChanged("B".into()),
+            Message::SubmitCapture,
+            Message::CaptureChanged("C".into()),
+            Message::SubmitCapture,
+        ],
+    );
+    let _ = app.update(first.run());
+    let second = app.save_if_changed().expect("the merged save");
+    let _ = app.update(second.run());
+
+    assert!(app.save_if_changed().is_none(), "nothing left to save");
+    let saved = storage::load(&dir).unwrap().unwrap().0;
+    let titles: Vec<_> = saved.boards[0].columns[0]
+        .cards
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(titles, ["A", "B", "C"]);
+}
+
+#[test]
+fn closing_waits_for_the_save_in_flight_then_exits() {
+    let (_tmp, dir) = data_dir();
+    let mut app = App::open(dir.clone()).unwrap();
+    let _ = app.update(Message::NewBoard);
+    let _ = app.update(Message::BoardNameChanged("Work".into()));
+    let _ = app.update(Message::CreateBoard);
+    let job = app.save_if_changed().expect("a save starts");
+
+    send_while_writing(&mut app, [Message::CloseRequested]);
+    assert_eq!(app.closing, Closing::Waiting);
+
+    let _ = app.update(job.run());
+
+    assert_eq!(app.closing, Closing::Exiting);
+    assert_eq!(storage::load(&dir).unwrap().unwrap().0, app.data);
+}
+
+#[test]
+fn closing_with_nothing_unsaved_exits_at_once() {
+    let (_tmp, dir) = data_dir();
+    let mut app = App::open(dir).unwrap();
+    create_board(&mut app, "Work");
+
+    send(&mut app, [Message::CloseRequested]);
+
+    assert_eq!(app.closing, Closing::Exiting);
+}
+
+/// Closes while saves fail: the close commits the pending rename, its save fails, the dialog asks.
+fn close_unsaved(dir: &Path) -> App {
+    use kanvibe::app::Field;
+    let mut app = App::open(dir.to_owned()).unwrap();
+    create_board(&mut app, "Work");
+    block_saves(dir);
+    let board = Field::BoardName(app.data.boards[0].id);
+    send(
+        &mut app,
+        [
+            Message::StartEdit(board),
+            Message::EditChanged("Home".into()),
+            Message::CloseRequested,
+        ],
+    );
+    assert_eq!(app.data.boards[0].name, "Home");
+    assert_eq!(app.editing, None, "committed");
+    assert_eq!(
+        app.closing,
+        Closing::Asking,
+        "Retry / Save a copy as… / Quit"
+    );
+    app
+}
+
+#[test]
+fn closing_while_unsaved_asks_and_retry_saves_then_exits() {
+    let (_tmp, dir) = data_dir();
+    let mut app = close_unsaved(&dir);
+
+    send(&mut app, [Message::RetrySave]);
+    assert_eq!(app.closing, Closing::Asking, "still failing");
+
+    unblock_saves(&dir);
+    send(&mut app, [Message::RetrySave]);
+
+    assert_eq!(app.closing, Closing::Exiting);
+    assert_eq!(
+        storage::load(&dir).unwrap().unwrap().0.boards[0].name,
+        "Home"
+    );
+}
+
+#[test]
+fn closing_while_unsaved_quits_without_saving() {
+    let (_tmp, dir) = data_dir();
+    let mut app = close_unsaved(&dir);
+
+    send(&mut app, [Message::QuitWithoutSaving]);
+
+    assert_eq!(app.closing, Closing::Exiting);
+}
+
+#[test]
+fn closing_while_unsaved_exits_once_a_copy_is_saved() {
+    let (_tmp, dir) = data_dir();
+    let mut app = close_unsaved(&dir);
+
+    send(&mut app, [Message::CopySaved(None)]);
+    assert_eq!(app.closing, Closing::Asking, "Save dialog cancelled");
+
+    send(
+        &mut app,
+        [Message::CopySaved(Some(Err("Not saved: X: full".into())))],
+    );
+    assert_eq!(app.closing, Closing::Asking);
+    assert_eq!(app.not_saved.as_deref(), Some("Not saved: X: full"));
+
+    send(&mut app, [Message::CopySaved(Some(Ok(())))]);
+    assert_eq!(app.closing, Closing::Exiting);
+}
+
+#[test]
+fn esc_dismisses_the_close_dialog_and_keeps_the_app_open() {
+    let (_tmp, dir) = data_dir();
+    let mut app = close_unsaved(&dir);
+
+    send(&mut app, [Message::Escape]);
+
+    assert_eq!(app.closing, Closing::No);
+    assert!(app.not_saved.is_some(), "the bar stays");
+}
+
+#[test]
+fn a_saved_copy_loads_like_the_data_file() {
+    let (_tmp, dir) = data_dir();
+    let copy = dir.join("elsewhere");
+    fs::create_dir(&copy).unwrap();
+    let data = sample();
+
+    storage::save_copy(&copy.join("kanvibe.json"), &data, &Settings::default()).unwrap();
+
+    assert_eq!(storage::load(&copy).unwrap().unwrap().0, data);
+}
+
+#[test]
+fn a_failed_save_is_retried_by_the_timer_without_a_change() {
+    let (_tmp, dir) = data_dir();
+    let mut app = App::open(dir.clone()).unwrap();
+    block_saves(&dir);
+    create_board(&mut app, "Work");
+
+    send(&mut app, [Message::RetrySave]);
+    assert!(app.not_saved.is_some(), "still failing");
+
+    unblock_saves(&dir);
+    send(&mut app, [Message::RetrySave]);
+
+    assert_eq!(app.not_saved, None);
+    assert_eq!(storage::load(&dir).unwrap().unwrap().0, app.data);
 }
