@@ -39,6 +39,9 @@ impl App {
             column![
                 header,
                 self.editable_name(Field::CardTitle(card.id), &card.title, 20),
+                button("Archive Card")
+                    .style(button::secondary)
+                    .on_press(Message::ArchiveCard(card.id)),
                 text(times).size(12),
             ]
             .spacing(12),

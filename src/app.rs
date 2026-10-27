@@ -59,6 +59,10 @@ pub struct App {
     pub panel: Option<Id>,
     /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
     pub rotation: storage::Rotation,
+    /// The Board whose Archive view replaces its Columns; `None` = the Columns show.
+    pub archive: Option<Id>,
+    /// The archived Card whose "Permanently delete" question is open.
+    pub delete_ask: Option<Id>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,6 +206,20 @@ pub enum Message {
     ClosePanel,
     /// F2: edit the open Card's title.
     EditTitle,
+    /// Del: archive the selected Card.
+    ArchiveSelected,
+    /// The panel's "Archive Card" button.
+    ArchiveCard(Id),
+    /// "Remove Column (archives N Cards)" in the Column menu.
+    RemoveColumn(Id),
+    /// "Archive (n)" in the Board header.
+    OpenArchive,
+    /// "Back to Board".
+    CloseArchive,
+    Restore(Id),
+    /// An archived Card's Delete button: opens the question.
+    AskDelete(Id),
+    ConfirmDelete,
 }
 
 impl App {
@@ -257,13 +275,16 @@ impl App {
                 }
             }
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
+            Message::Escape if self.delete_ask.is_some() => self.delete_ask = None,
             Message::Escape => {
-                // One layer per press: the text field, the Card panel, then the selection.
+                // One layer per press: the text field, the Archive view, the Card panel, then
+                // the selection.
                 if self.board_name.is_none()
                     && self.capture.is_none()
                     && self.editing.is_none()
                     && self.column_menu.is_none()
                     && self.limit_input.is_none()
+                    && self.archive.take().is_none()
                     && self.panel.take().is_none()
                 {
                     self.selection = None;
@@ -305,6 +326,21 @@ impl App {
                     return self.update(Message::StartEdit(Field::CardTitle(card)));
                 }
             }
+            Message::ArchiveSelected => {
+                if let Some(card) = self.selection.and_then(|s| s.card) {
+                    return self.apply(Message::ArchiveCard(card));
+                }
+            }
+            Message::ArchiveCard(card) => {
+                self.archive_card(card);
+                return self.reveal_selection();
+            }
+            Message::RemoveColumn(column) => self.remove_column(column),
+            Message::OpenArchive => self.open_archive(),
+            Message::CloseArchive => self.archive = None,
+            Message::Restore(card) => self.restore_card(card),
+            Message::AskDelete(card) => self.ask_delete(card),
+            Message::ConfirmDelete => self.confirm_delete(),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -361,7 +397,14 @@ impl App {
                     .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
                 };
                 let focused = focused.and_then(input);
-                if let Some(message) = keys::map(&event, &Context { focused }) {
+                let message = keys::map(&event, &Context { focused });
+                // The Archive view and its question leave only Esc (and Undo/Redo in the view).
+                let allowed = |m: &Message| match m {
+                    Message::Escape => true,
+                    Message::Undo | Message::Redo => self.delete_ask.is_none(),
+                    _ => self.archive.is_none() && self.delete_ask.is_none(),
+                };
+                if let Some(message) = message.filter(allowed) {
                     return self.update(message);
                 }
             }
@@ -554,6 +597,7 @@ impl App {
     /// longer an active Card on the current Board, and an open panel follows the selected Card.
     fn validate_ui(&mut self) {
         self.validate_selection();
+        self.validate_archive();
         let on_board = |card: Id| {
             self.board().is_some_and(|b| {
                 b.columns
@@ -567,7 +611,7 @@ impl App {
         }
     }
 
-    fn board_of_card(&self, card: Id) -> Option<Id> {
+    pub(crate) fn board_of_card(&self, card: Id) -> Option<Id> {
         let board = self.data.boards.iter().find(|b| {
             b.columns
                 .iter()
@@ -577,7 +621,7 @@ impl App {
     }
 
     /// The current Board.
-    fn board(&self) -> Option<&Board> {
+    pub(crate) fn board(&self) -> Option<&Board> {
         let id = self.current_board?;
         self.data.boards.iter().find(|b| b.id == id)
     }
@@ -590,7 +634,7 @@ impl App {
             .find(|c| c.id == column)
     }
 
-    fn board_of_column(&self, column: Id) -> Option<Id> {
+    pub(crate) fn board_of_column(&self, column: Id) -> Option<Id> {
         let board = self
             .data
             .boards
@@ -674,6 +718,7 @@ impl App {
             .iter()
             .find(|b| Some(b.id) == self.current_board)
         {
+            Some(board) if self.archive == Some(board.id) => self.view_archive(board),
             Some(board) => self.view_board(board),
             None => self.view_empty(),
         };
@@ -691,6 +736,10 @@ impl App {
                 content
             ]
             .into(),
+            None => content,
+        };
+        let content = match self.view_delete_dialog() {
+            Some(dialog) => stack![content, dialog].into(),
             None => content,
         };
         match self.closing {
@@ -734,8 +783,16 @@ impl App {
                 .style(button::secondary)
                 .on_press(Message::AddColumn(board.id))
                 .into()]);
-        column![
+        let header = row![
             self.editable_name(Field::BoardName(board.id), &board.name, 20),
+            button(text(format!("Archive ({})", board.archived_cards.len())))
+                .style(button::secondary)
+                .on_press(Message::OpenArchive),
+        ]
+        .spacing(8)
+        .align_y(Center);
+        column![
+            header,
             scrollable(row(columns).spacing(12).height(Fill))
                 .id(BOARD_SCROLL)
                 .horizontal()
@@ -798,10 +855,16 @@ impl App {
                     .into(),
             ),
             _ if self.column_menu == Some(col.id) => Some(
-                button("Set limit…")
-                    .style(button::secondary)
-                    .on_press(Message::OpenLimit(col.id))
-                    .into(),
+                column![
+                    button("Set limit…")
+                        .style(button::secondary)
+                        .on_press(Message::OpenLimit(col.id)),
+                    button(text(crate::archive::remove_label(col)))
+                        .style(button::secondary)
+                        .on_press(Message::RemoveColumn(col.id)),
+                ]
+                .spacing(4)
+                .into(),
             ),
             _ => None,
         };
