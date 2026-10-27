@@ -174,6 +174,7 @@
 - `tests/update.rs` helpers: `send(&mut app, [msgs])`, `app_with_board()` (one current Board "Work"), `column_id`, `card_titles`, `capture(app, column, &[titles])`.
 
 ## Checks
+- Local CI is `ci.bat` (fmt --check, clippy -D warnings, tests); no hosted CI. Run it before every push and merge.
 - `cargo test --offline -q` and `cargo clippy --offline --all-targets -- -D warnings`; `cargo fmt` before committing.
 
 ## Windows tooling gotchas
