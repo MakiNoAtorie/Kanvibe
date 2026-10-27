@@ -15,3 +15,10 @@ serde_json = "1.0.154"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+# Keep target/ small: no debug info for dependencies, line tables only for our crate.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
