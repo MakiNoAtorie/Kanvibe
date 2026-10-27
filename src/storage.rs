@@ -175,10 +175,7 @@ fn move_aside(dir: &Path) -> io::Result<()> {
     if !file.try_exists()? {
         return Ok(());
     }
-    let format = time::macros::format_description!("[year][month][day]T[hour][minute][second]Z");
-    let stamp = time::OffsetDateTime::now_utc()
-        .format(format)
-        .map_err(io::Error::other)?;
+    let stamp = jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ");
     let base = format!("{FILE}.corrupt-{stamp}");
     let mut target = dir.join(&base);
     for n in 2.. {

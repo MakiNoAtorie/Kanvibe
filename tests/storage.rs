@@ -329,6 +329,12 @@ fn restore_moves_the_bad_file_aside_then_copies_the_newest_readable_backup_over_
     let corrupt = corrupt_files(&dir);
     assert_eq!(corrupt.len(), 1);
     assert_eq!(corrupt[0].1, "{ broken");
+    let stamp = corrupt[0].0.strip_prefix("kanvibe.json.corrupt-").unwrap();
+    let shape: String = stamp
+        .chars()
+        .map(|c| if c.is_ascii_digit() { '9' } else { c })
+        .collect();
+    assert_eq!(shape, "99999999T999999Z", "UTC timestamp, no colons");
     assert!(dir.join("kanvibe.json.bak1").exists(), "backups are kept");
 }
 

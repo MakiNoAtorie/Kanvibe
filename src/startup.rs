@@ -138,13 +138,11 @@ impl Problem {
     }
 }
 
-/// `2026-10-27 14:03` in local time (UTC if the local offset is unknown).
+/// `2026-10-27 14:03` in local time (UTC if the system time zone is unknown).
 fn local_date(at: SystemTime) -> String {
-    let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
-    let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
-    time::OffsetDateTime::from(at)
-        .to_offset(offset)
-        .format(format)
+    jiff::Timestamp::try_from(at)
+        .map(|t| t.to_zoned(jiff::tz::TimeZone::system()))
+        .map(|t| t.strftime("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
 }
 
