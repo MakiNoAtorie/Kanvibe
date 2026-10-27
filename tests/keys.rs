@@ -37,9 +37,13 @@ fn letter(c: &str, modifiers: Modifiers) -> keyboard::Event {
     press(Key::Character(c.into()), modifiers)
 }
 
-const NOTHING_FOCUSED: Context = Context { focused: None };
+const NOTHING_FOCUSED: Context = Context {
+    focused: None,
+    dragging: false,
+};
 const CAPTURE_FOCUSED: Context = Context {
     focused: Some(Input::Capture),
+    dragging: false,
 };
 
 #[test]

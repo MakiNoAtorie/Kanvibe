@@ -9,9 +9,11 @@ use iced::{Center, Element, Event, Fill, Subscription, Task, event, keyboard};
 use iced::{Theme, time, window};
 
 use crate::domain::{Board, Column, Data, Id};
+use crate::drag::{self, Drag, Item, Target};
 use crate::history::History;
 use crate::keys::{self, Context, Input};
 use crate::storage::{self, Settings};
+use iced::Point;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -63,6 +65,8 @@ pub struct App {
     pub sidebar_collapsed: bool,
     /// The sidebar's "Archived (n)" section is expanded.
     pub archived_open: bool,
+    /// The press or drag in progress; see `drag`.
+    pub drag: Option<Drag>,
     /// The Card the Card panel shows. It follows the selected Card; see `validate_ui`.
     pub panel: Option<Id>,
     /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
@@ -224,6 +228,20 @@ pub enum Message {
     ToggleSidebar,
     /// The "Archived (n)" heading in the sidebar.
     ToggleArchivedBoards,
+    /// Left press on a draggable item: a drag after 5px of movement, else a click on release.
+    DragPress(Item),
+    /// The cursor moved (window coordinates) while a press or drag is in progress.
+    DragMoved(Point),
+    /// The cursor is over a drop target.
+    DragHover(Target),
+    /// The cursor left a drop target.
+    DragLeave(Target),
+    /// The left button was released anywhere: drop, click, or cancel when over no target.
+    DragEnd,
+    /// Esc during a drag: the item stays where it was.
+    DragCancel,
+    /// Autoscroll timer while dragging.
+    DragTick,
     /// Enter: open the Card panel on the selected Card.
     OpenPanel,
     /// The panel's X button.
@@ -310,6 +328,7 @@ impl App {
                     return self.reveal_selection();
                 }
             }
+            Message::Escape if self.drag.is_some() => self.drag = None, // first Esc layer
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape if self.confirm.is_some() => self.confirm = None,
             Message::Escape => {
@@ -404,6 +423,7 @@ impl App {
             }
             Message::Undo | Message::Redo => {
                 self.commit_pending();
+                self.drag = None;
                 let step = match message {
                     Message::Undo => self.history.undo(),
                     _ => self.history.redo(),
@@ -435,7 +455,8 @@ impl App {
                     .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
                 };
                 let focused = focused.and_then(input);
-                let message = keys::map(&event, &Context { focused });
+                let dragging = self.drag.is_some();
+                let message = keys::map(&event, &Context { focused, dragging });
                 // The Archive view and any question leave only Esc (and Undo/Redo in the view).
                 let allowed = |m: &Message| match m {
                     Message::Escape => true,
@@ -614,8 +635,81 @@ impl App {
                     self.history.record(&self.data.boards, None, None);
                 }
             }
+            Message::DragPress(item) => {
+                self.commit_pending();
+                self.drag = Some(Drag::new(item));
+            }
+            Message::DragMoved(to) => {
+                if let Some(drag) = &mut self.drag {
+                    drag.moved(to);
+                }
+            }
+            Message::DragHover(target) => {
+                if let Some(drag) = &mut self.drag {
+                    drag.hover(target);
+                }
+            }
+            Message::DragLeave(target) => {
+                if let Some(drag) = &mut self.drag {
+                    drag.leave(target);
+                }
+            }
+            Message::DragEnd => {
+                let Some(drag) = self.drag.take() else {
+                    return Task::none(); // the second of the local and global release
+                };
+                match (drag.item, drag.target()) {
+                    (Item::Card(card), _) if !drag.started => {
+                        if let Some(column) = self.column_of_card(card) {
+                            let card = Some(card);
+                            return self.update(Message::Select(Selection { column, card }));
+                        }
+                    }
+                    (Item::Card(card), Some(target)) => self.drop_card(card, target),
+                    (_, None) => {} // released outside any target: cancel
+                }
+            }
+            Message::DragCancel => self.drag = None,
+            Message::DragTick => {
+                if let Some(drag) = self.drag.as_ref().filter(|d| d.started)
+                    && let Some(cursor) = drag.cursor
+                {
+                    let column = match drag.target() {
+                        Some(Target::Card { column, .. } | Target::Column(column)) => Some(column),
+                        None => None,
+                    };
+                    return drag::autoscroll(cursor, BOARD_SCROLL.into(), column.map(cards_widget));
+                }
+            }
         }
         Task::none()
+    }
+
+    /// Moves `card` into the slot `target`; dropping where it was records no step.
+    fn drop_card(&mut self, card: Id, target: Target) {
+        let (column, gap) = match target {
+            Target::Card { column, index } => (column, index),
+            Target::Column(column) => (column, usize::MAX),
+        };
+        // The Card leaves its own slot first, so a later gap in its Column moves up by one.
+        let from = self
+            .find_column(column)
+            .and_then(|c| c.cards.iter().position(|x| x.id == card));
+        let index = match from {
+            Some(i) if i < gap => gap - 1,
+            _ => gap,
+        };
+        self.data.move_card(card, column, index);
+        self.validate_selection();
+        let board = self.board_of_column(column);
+        self.history.record(&self.data.boards, board, board);
+    }
+
+    fn column_of_card(&self, card: Id) -> Option<Id> {
+        let mut columns = self.data.boards.iter().flat_map(|b| &b.columns);
+        columns
+            .find(|c| c.cards.iter().any(|x| x.id == card))
+            .map(|c| c.id)
     }
 
     /// Commits the text edit in progress, if any, as one undo step (none if nothing changed),
@@ -764,7 +858,12 @@ impl App {
             ) => Some(Message::Escape),
             _ => None,
         });
-        Subscription::batch([keys, self.edit_subscription(), self.retry_subscription()])
+        Subscription::batch([
+            keys,
+            self.edit_subscription(),
+            self.retry_subscription(),
+            drag::subscription(self.drag.as_ref()),
+        ])
     }
 
     /// Every 10 s while the last save failed.
@@ -847,6 +946,10 @@ impl App {
             .into(),
             None => content,
         };
+        let content = match self.ghost() {
+            Some(ghost) => stack![content, ghost].into(),
+            None => content,
+        };
         match self.closing {
             Closing::Asking | Closing::Waiting if self.not_saved.is_some() => {
                 stack![content, self.view_close_dialog()].into()
@@ -856,6 +959,20 @@ impl App {
                 None => content,
             },
         }
+    }
+
+    /// The dragged Card under the cursor, once the drag has started.
+    fn ghost(&self) -> Option<Element<'_, Message>> {
+        let drag = self.drag.as_ref().filter(|d| d.started)?;
+        let Item::Card(card) = drag.item;
+        let mut cards = self
+            .data
+            .boards
+            .iter()
+            .flat_map(|b| &b.columns)
+            .flat_map(|c| &c.cards);
+        let title = &cards.find(|c| c.id == card)?.title;
+        Some(drag::ghost(title, drag.cursor?))
     }
 
     /// Retry / Save a copy as… / Quit without saving, over the dimmed app.
@@ -925,11 +1042,14 @@ impl App {
 
     fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
         let selection = self.selection.filter(|s| s.column == col.id);
-        let cards = col.cards.iter().map(|card| {
-            let select = Message::Select(Selection {
-                column: col.id,
-                card: Some(card.id),
-            });
+        let dragging = self.drag.is_some();
+        // The slot the drop indicator shows: before Card `gap`, or after the last.
+        let gap = match self.drag.as_ref().and_then(Drag::target) {
+            Some(Target::Card { column, index }) if column == col.id => Some(index),
+            Some(Target::Column(column)) if column == col.id => Some(col.cards.len()),
+            _ => None,
+        };
+        let cards = col.cards.iter().enumerate().map(|(i, card)| {
             let card_box = container(text(&card.title))
                 .id(card_widget(card.id))
                 .width(Fill)
@@ -938,8 +1058,17 @@ impl App {
                     container::bordered_box,
                     selection.is_some_and(|s| s.card == Some(card.id)),
                 ));
-            mouse_area(card_box).on_press(select).into()
+            // Indicator above, padding below: Card slots touch, so no gap between them
+            // falls through to the Column body.
+            let slot = container(column![drag::indicator(gap == Some(i)), card_box].spacing(2))
+                .padding(iced::Padding::ZERO.bottom(2));
+            let target = Target::Card {
+                column: col.id,
+                index: i,
+            };
+            drag::target(drag::source(slot, Item::Card(card.id)), target, dragging).into()
         });
+        let cards = cards.chain([drag::indicator(gap == Some(col.cards.len()))]);
         let footer: Element<_> = match &self.capture {
             Some(capture) if capture.column == col.id => text_input("Card title", &capture.text)
                 .id(CAPTURE_INPUT)
@@ -992,7 +1121,7 @@ impl App {
             column![header]
                 .extend(menu)
                 .push(
-                    scrollable(column(cards).spacing(6))
+                    scrollable(column(cards))
                         .id(cards_widget(col.id))
                         .height(Fill),
                 )
@@ -1005,12 +1134,11 @@ impl App {
         .padding(8)
         .style(outlined(container::rounded_box, selection.is_some()));
         // Cards and buttons capture their clicks, so this only fires on the Column's empty area.
-        mouse_area(column_box)
-            .on_press(Message::Select(Selection {
-                column: col.id,
-                card: None,
-            }))
-            .into()
+        let area = mouse_area(column_box).on_press(Message::Select(Selection {
+            column: col.id,
+            card: None,
+        }));
+        drag::target(area, Target::Column(col.id), dragging).into()
     }
 
     fn view_empty(&self) -> Element<'_, Message> {

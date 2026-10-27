@@ -1,6 +1,7 @@
 pub mod app;
 pub mod archive;
 pub mod domain;
+pub mod drag;
 pub mod history;
 pub mod keys;
 pub mod panel;

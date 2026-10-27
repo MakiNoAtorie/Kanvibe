@@ -124,6 +124,7 @@ fn del_does_nothing_without_a_selected_card_and_is_ignored_in_a_text_field() {
 
     let typing = Context {
         focused: Some(keys::Input::Edit),
+        ..Context::default()
     };
     assert_eq!(keys::map(&press(Named::Delete), &typing), None);
 }
