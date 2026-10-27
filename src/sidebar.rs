@@ -1,9 +1,12 @@
 //! The left sidebar: active Boards, the collapsed "Archived (n)" section and the footer.
-use iced::widget::{button, column, container, row, scrollable, space, text, text_input, tooltip};
-use iced::{Center, Element, Fill};
+use iced::widget::{
+    button, column, container, mouse_area, row, scrollable, space, text, text_input, tooltip,
+};
+use iced::{Border, Center, Color, Element, Fill, Theme};
 
 use crate::app::{App, BOARD_NAME_INPUT, Message};
-use crate::domain::Board;
+use crate::domain::{Board, Id};
+use crate::drag::{self, Drag, Target};
 
 const WIDTH: u32 = 220;
 const RAIL: u32 = 40;
@@ -24,9 +27,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
     }
     let (archived, active): (Vec<&Board>, Vec<&Board>) =
         app.data.boards.iter().partition(|b| b.archived);
-    let boards = active
-        .iter()
-        .map(|b| board_row(b, Some(b.id) == app.current_board));
+    let boards = active.iter().map(|b| {
+        let current = Some(b.id) == app.current_board;
+        let row = board_row(b, current);
+        match &app.drag {
+            Some(drag) if !current => drop_row(row, b.id, drag),
+            _ => row,
+        }
+    });
     let archived_section = (!archived.is_empty()).then(|| {
         let heading = button(text(format!("Archived ({})", archived.len())))
             .style(button::text)
@@ -85,6 +93,25 @@ pub fn board_row(board: &Board, current: bool) -> Element<'_, Message> {
         .width(Fill)
         .on_press(Message::OpenBoard(board.id))
         .into()
+}
+
+/// A Board row as the drop target of a dragged Card (#16), outlined while it is hovered.
+fn drop_row<'a>(row: Element<'a, Message>, board: Id, drag: &Drag) -> Element<'a, Message> {
+    let target = Target::Board(board);
+    let hovered = drag.started && drag.hovered.contains(&target);
+    let outlined = container(row).style(move |theme: &Theme| container::Style {
+        border: Border {
+            color: if hovered {
+                theme.palette().primary
+            } else {
+                Color::TRANSPARENT
+            },
+            width: 2.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    });
+    drag::target(mouse_area(outlined), target, true).into()
 }
 
 /// One line, clipped, with the full name in a tooltip.

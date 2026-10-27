@@ -46,6 +46,8 @@ pub enum Target {
     Card { column: Id, index: usize },
     /// A Column's body outside its Cards: the slot after its last Card.
     Column(Id),
+    /// A sidebar Board row other than the current one: moves the Card to that Board.
+    Board(Id),
 }
 
 /// A press on an item: a drag once the cursor has moved [`THRESHOLD`] px.
