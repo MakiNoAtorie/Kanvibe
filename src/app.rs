@@ -1621,7 +1621,10 @@ pub(crate) fn card_face<'a>(
         ]
         .spacing(4)
         .extend(chips)
-        .extend(card.progress().map(|p| text(p).size(12).into())),
+        .extend(
+            card.progress()
+                .map(|p| text(format!("☑ {p}")).size(12).into()),
+        ),
     )
     .width(Fill)
     .padding(8)

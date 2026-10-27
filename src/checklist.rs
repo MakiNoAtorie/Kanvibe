@@ -9,7 +9,11 @@ use crate::domain::{Card, Item};
 impl App {
     pub(crate) fn view_checklist<'a>(&'a self, card: &'a Card) -> Element<'a, Message> {
         let items = card.checklist.iter().map(|item| self.view_item(item));
-        column![text("Checklist").size(14)]
+        let heading = match card.progress() {
+            Some(p) => format!("Checklist {p}"),
+            None => "Checklist".into(),
+        };
+        column![text(heading).size(14)]
             .extend(items)
             .push(
                 button("+ Add Checklist Item")
