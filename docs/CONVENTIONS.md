@@ -138,6 +138,12 @@
 - A captured Esc sends `Message::LeaveField`: it forwards to `Escape` when a field with state is open, else only leaves the focused box. New stateless text boxes need their own `keys::Input` variant and a look at `LeaveField`'s list. Unfocus via `operation::focus("no-widget")`.
 - Board header row: `[name, filter_bar(), Archive (n), ⋯]`; `filter_lines(board)` sits under it.
 
+## Image export (#25, `src/image.rs`)
+- `image::render(&Board, &Filter, &Theme) -> Result<Vec<u8>, String>` blocks; call only on a worker thread. `image::LIMIT = 8192`. `App.saving_image`; Messages `SaveImage(Id)`, `ImageSaved(..)` → `App::update_image`.
+- `app::card_face(Option<&Board>, &Card)` is the shared unstyled Card face; new face content goes there. `Filter::count_label(column, shown)` builds "n of m".
+- Layout: 12 px padding, 280 px Columns, 12 px gaps: width = 292·n + 12.
+- `iced_test::simulator(app.view()).find("text")` checks view text in tests (starts a GPU device; use sparingly). Clippy: `as_chunks::<4>().0` for RGBA, not `chunks_exact(4)`.
+
 ## Esc order (current)
 - cancel drag → shortcuts overlay → notice → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Board menu / Labels filter list → Archive view → panel → filter → selection.
 
