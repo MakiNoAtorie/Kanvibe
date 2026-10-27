@@ -111,6 +111,13 @@ impl Screen {
         }
     }
 
+    pub fn theme(&self) -> iced::Theme {
+        match self {
+            Screen::App(app) => app.theme(),
+            Screen::Problem(_) => iced::Theme::Light,
+        }
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         match self {
             Screen::App(app) => app.view().map(Message::App),
@@ -186,10 +193,17 @@ pub fn run() -> iced::Result {
             std::process::exit(1);
         }
     };
-    let screen = std::cell::Cell::new(Some(Screen::open(dir)));
+    let mut screen = Screen::open(dir);
+    let window = match &mut screen {
+        Screen::App(app) => app.fit_window(&crate::chrome::monitors()),
+        Screen::Problem(_) => App::default().fit_window(&[]),
+    };
+    let screen = std::cell::Cell::new(Some(screen));
     let boot = move || screen.take().expect("iced boots once");
     iced::application(boot, Screen::update, Screen::view)
         .title("Kanvibe")
+        .window(window)
+        .theme(Screen::theme)
         .subscription(Screen::subscription)
         .exit_on_close_request(false) // the app commits the pending edit on CloseRequested first
         .run()

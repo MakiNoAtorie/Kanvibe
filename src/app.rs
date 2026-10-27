@@ -76,6 +76,12 @@ pub struct App {
     pub archive: Option<Id>,
     /// The Label picker over the open Card's panel; see `labels`.
     pub label_picker: Option<LabelPicker>,
+    /// The dark theme. Saved in the settings.
+    pub dark: bool,
+    /// Window geometry and the maximised flag. Saved with the next save, never a save on its own.
+    pub window: crate::chrome::WindowState,
+    /// The F1 shortcuts overlay is open.
+    pub shortcuts: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +306,18 @@ pub enum Message {
     NewLabelChanged(String),
     NewLabelColor(String),
     CreateLabel,
+    /// The theme button in the sidebar footer.
+    ToggleTheme,
+    /// The window was resized (logical pixels).
+    Resized(iced::Size),
+    /// The window was moved (logical pixels).
+    Moved(iced::Point),
+    /// Whether the window is maximised: the answer to the query each report starts.
+    Maximized(bool),
+    /// F1 or the footer's "Keyboard shortcuts".
+    ShowShortcuts,
+    /// The footer's "Open data folder".
+    OpenDataFolder,
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -366,6 +384,7 @@ impl App {
                 }
             }
             Message::Escape if self.drag.is_some() => self.drag = None, // first Esc layer
+            Message::Escape if self.shortcuts => self.shortcuts = false,
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape if self.confirm.is_some() => self.confirm = None,
             Message::Escape if self.label_picker.is_some() => self.escape_labels(),
@@ -712,6 +731,22 @@ impl App {
                 }
             }
             Message::ToggleSidebar => self.sidebar_collapsed = !self.sidebar_collapsed,
+            Message::ToggleTheme => self.dark = !self.dark,
+            Message::ShowShortcuts => self.shortcuts = true,
+            Message::OpenDataFolder => {
+                if let Some(dir) = &self.data_dir {
+                    crate::chrome::open_folder(dir);
+                }
+            }
+            Message::Maximized(maximized) => self.window.set_maximized(maximized),
+            Message::Resized(size) => {
+                self.window.resized(size);
+                return crate::chrome::query_maximized();
+            }
+            Message::Moved(pos) => {
+                self.window.moved(pos);
+                return crate::chrome::query_maximized();
+            }
             Message::ToggleArchivedBoards => self.archived_open = !self.archived_open,
             Message::ToggleBoardMenu => {
                 self.commit_pending();
@@ -986,8 +1021,14 @@ impl App {
             ) => Some(Message::Escape),
             _ => None,
         });
+        let window = event::listen_with(|event, _status, _window| match event {
+            Event::Window(window::Event::Resized(size)) => Some(Message::Resized(size)),
+            Event::Window(window::Event::Moved(pos)) => Some(Message::Moved(pos)),
+            _ => None,
+        });
         Subscription::batch([
             keys,
+            window,
             self.edit_subscription(),
             self.retry_subscription(),
             drag::subscription(self.drag.as_ref()),
@@ -1082,6 +1123,9 @@ impl App {
             Some(ghost) => stack![content, ghost].into(),
             None => content,
         };
+        if self.shortcuts {
+            return stack![content, self.view_shortcuts()].into();
+        }
         match self.closing {
             Closing::Asking | Closing::Waiting if self.not_saved.is_some() => {
                 stack![content, self.view_close_dialog()].into()
@@ -1213,10 +1257,12 @@ impl App {
                 .on_input(Message::CaptureChanged)
                 .on_submit(Message::SubmitCapture)
                 .into(),
-            _ => button("+ Add Card")
-                .style(button::text)
-                .on_press(Message::OpenCapture(col.id))
-                .into(),
+            _ => crate::chrome::tip(
+                button("+ Add Card")
+                    .style(button::text)
+                    .on_press(Message::OpenCapture(col.id)),
+                "Add Card (N)",
+            ),
         };
         let count = text(col.count_label());
         let count = if col.over_limit() {
@@ -1322,6 +1368,16 @@ fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
             .spacing(12)
             .max_width(480),
     )
+}
+
+/// Whether two saved states match, ignoring the window: geometry never triggers a save on its own.
+fn same(a: &(Data, Settings), b: &(Data, Settings)) -> bool {
+    let bare = |s: &Settings| Settings {
+        window: None,
+        maximized: false,
+        ..s.clone()
+    };
+    a.0 == b.0 && bare(&a.1) == bare(&b.1)
 }
 
 /// An overlay panel over the dimmed app, blocking clicks to what is below.
@@ -1480,6 +1536,8 @@ impl App {
         let current_board = data.fallback(last, &ids);
         Ok(App {
             sidebar_collapsed: settings.sidebar_collapsed,
+            dark: settings.dark,
+            window: crate::chrome::WindowState::new(settings.window, settings.maximized),
             saved: (data.clone(), settings),
             data,
             current_board,
@@ -1498,11 +1556,11 @@ impl App {
             return None; // live text waits for the idle write (`EditTick`)
         }
         let state = (self.data.clone(), self.settings());
-        if state == self.saved {
+        if same(&state, &self.saved) {
             self.not_saved = None; // e.g. undone back to what the file holds
             return None;
         }
-        if self.failed.as_ref() == Some(&state) {
+        if self.failed.as_ref().is_some_and(|f| same(f, &state)) {
             return None; // wait for a change or the retry timer
         }
         // ponytail: rotation runs here on the UI thread (a file copy, at most once per session or
@@ -1523,7 +1581,7 @@ impl App {
     /// Exits once a requested close has nothing left to save and no save in flight;
     /// otherwise the next `save_if_changed` starts the save and its `Saved` comes back here.
     fn exit_if_saved(&mut self) -> Task<Message> {
-        let clean = self.saved.0 == self.data && self.saved.1 == self.settings();
+        let clean = same(&self.saved, &(self.data.clone(), self.settings()));
         if self.closing != Closing::Waiting || self.writing.is_some() || !clean {
             return Task::none();
         }
@@ -1536,6 +1594,9 @@ impl App {
         Settings {
             last_board: self.current_board,
             sidebar_collapsed: self.sidebar_collapsed,
+            dark: self.dark,
+            window: self.window.geometry,
+            maximized: self.window.maximized,
         }
     }
 }

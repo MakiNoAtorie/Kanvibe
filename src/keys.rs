@@ -50,6 +50,9 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         (false, Some('n')) if !typing && !modifiers.alt() => return Some(Message::NewCard),
         _ => {}
     }
+    if *key == Key::Named(Named::F1) {
+        return Some(Message::ShowShortcuts);
+    }
     if *key == Key::Named(Named::Escape) {
         return Some(Message::Escape);
     }

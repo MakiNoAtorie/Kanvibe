@@ -34,6 +34,7 @@ fn round_trip_keeps_boards_columns_cards_and_next_id_pretty_printed() {
     let settings = Settings {
         last_board: Some(data.boards[1].id),
         sidebar_collapsed: true,
+        ..Settings::default()
     };
 
     storage::save(&dir, &data, &settings).unwrap();
