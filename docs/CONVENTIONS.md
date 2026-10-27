@@ -131,8 +131,15 @@
 - Import repairs on a throwaway `Data` before remapping IDs; names from outside go through `Data::free_name` (" (n)" rule).
 - `tests/transfer.rs` helpers: `app_with_work()`, `shape(&Board)`, `ids`, `export`, `import(app, bytes)`, `refusal(bytes)`, `imported_name(existing, name)`.
 
+## Filter (#18, `src/filter.rs`)
+- Strict predicate: `filter::Filter { text, labels }` with `is_on()` and `matches(&Card)` (no iced types); image export uses `matches`. `App::shown(&Card)` adds the selected and just-created (`filter_kept`) Cards for the live view.
+- `filter::placement(cards, slot, shown) -> usize` = drop gap under a filter; `Target::Card.index` stays an index among all Cards. `moved`/`card_move` take `shown: impl Fn(&Card) -> bool` (pass `|c| self.shown(c)`).
+- App fields `filter`, `filter_kept`, `filter_menu`, cleared in `left_board()`; `App::clear_filter() -> bool`. Messages `FocusFilter`, `FilterChanged`, `SubmitFilter`, `ClearFilter`, `ToggleFilterMenu`, `FilterLabel(Id)`, `LeaveField` → `App::update_filter`.
+- A captured Esc sends `Message::LeaveField`: it forwards to `Escape` when a field with state is open, else only leaves the focused box. New stateless text boxes need their own `keys::Input` variant and a look at `LeaveField`'s list. Unfocus via `operation::focus("no-widget")`.
+- Board header row: `[name, filter_bar(), Archive (n), ⋯]`; `filter_lines(board)` sits under it.
+
 ## Esc order (current)
-- cancel drag → shortcuts overlay → notice → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Archive view → panel → (filter) → selection.
+- cancel drag → shortcuts overlay → notice → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Board menu / Labels filter list → Archive view → panel → filter → selection.
 
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
