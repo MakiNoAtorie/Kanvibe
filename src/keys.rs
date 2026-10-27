@@ -23,6 +23,8 @@ pub enum Input {
     Edit,
     /// The box of a pending Checklist Item edit.
     Item,
+    /// The Board header's filter box.
+    Filter,
 }
 
 /// Maps a key press to the Message it stands for. iced only delivers keys the focused widget
@@ -47,6 +49,7 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         (true, Some('z')) if modifiers.shift() => return Some(Message::Redo),
         (true, Some('z')) => return Some(Message::Undo),
         (true, Some('y')) => return Some(Message::Redo),
+        (true, Some('f')) => return Some(Message::FocusFilter),
         (false, Some('n')) if !typing && !modifiers.alt() => return Some(Message::NewCard),
         (false, Some('e')) if !typing && !modifiers.alt() => return Some(Message::EditDescription),
         (false, Some('m')) if !typing && !modifiers.alt() => return Some(Message::OpenMove),

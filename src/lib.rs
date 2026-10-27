@@ -5,6 +5,7 @@ pub mod chrome;
 pub mod description;
 pub mod domain;
 pub mod drag;
+pub mod filter;
 pub mod history;
 pub mod keys;
 pub mod labels;

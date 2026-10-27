@@ -9,8 +9,9 @@ use iced::{Center, Element, Event, Fill, Subscription, Task, event, keyboard};
 use iced::{Theme, time, window};
 
 use crate::description;
-use crate::domain::{Board, Column, Data, Id};
+use crate::domain::{Board, Card, Column, Data, Id};
 use crate::drag::{self, Drag, Item, Target};
+use crate::filter::{self, Filter};
 use crate::history::History;
 use crate::keys::{self, Context, Input};
 use crate::labels::{self, LabelPicker};
@@ -92,6 +93,12 @@ pub struct App {
     pub rendered: (String, iced::widget::markdown::Content),
     /// A message over the dimmed app with only OK (an import refused, an export failed).
     pub notice: Option<String>,
+    /// The Filter on the current Board; never saved. See `filter`.
+    pub filter: Filter,
+    /// Cards created while the Filter is on: shown even when they don't match.
+    pub filter_kept: Vec<Id>,
+    /// The Labels filter list under the Board header is open.
+    pub filter_menu: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -354,6 +361,21 @@ pub enum Message {
     ImportBoard,
     /// The picked file's bytes; `None` when the dialog was cancelled, `Err` when it can't be read.
     Imported(Option<Result<Vec<u8>, String>>),
+    /// Ctrl+F: focus the filter box.
+    FocusFilter,
+    /// Typing in the filter box.
+    FilterChanged(String),
+    /// Enter in the filter box: select the first visible Card.
+    SubmitFilter,
+    /// The filter box's × button, or "Clear filter".
+    ClearFilter,
+    /// The Labels filter button: open or close its list.
+    ToggleFilterMenu,
+    /// A checkbox in the Labels filter list.
+    FilterLabel(Id),
+    /// Esc captured by a focused text box (it has already unfocused): the "leave the text
+    /// field" layer. Only the filter box keeps no state, so then nothing else happens.
+    LeaveField,
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -428,16 +450,18 @@ impl App {
             Message::Escape if self.label_picker.is_some() => self.escape_labels(),
             Message::Escape if self.move_picker.is_some() => self.move_picker = None,
             Message::Escape => {
-                // One layer per press: the text field, the Archive view, the Card panel, then
-                // the selection.
+                // One layer per press: the text field, the Archive view, the Card panel, the
+                // Filter, then the selection.
                 if self.board_name.is_none()
                     && self.capture.is_none()
                     && self.editing.is_none()
                     && self.column_menu.is_none()
                     && self.limit_input.is_none()
                     && !self.board_menu
+                    && !self.filter_menu
                     && self.archive.take().is_none()
                     && self.panel.take().is_none()
+                    && !self.clear_filter()
                 {
                     self.selection = None;
                 }
@@ -445,6 +469,7 @@ impl App {
                 self.column_menu = None;
                 self.limit_input = None;
                 self.board_menu = false;
+                self.filter_menu = false;
                 self.capture = None; // Esc discards the capture box; other fields commit.
                 self.commit_pending();
             }
@@ -560,6 +585,13 @@ impl App {
             | Message::NewLabelChanged(_)
             | Message::NewLabelColor(_)
             | Message::CreateLabel => return self.update_labels(message),
+            Message::FocusFilter
+            | Message::FilterChanged(_)
+            | Message::SubmitFilter
+            | Message::ClearFilter
+            | Message::ToggleFilterMenu
+            | Message::FilterLabel(_)
+            | Message::LeaveField => return self.update_filter(message),
             Message::OpenMove => self.open_move(),
             Message::CloseMove => self.move_picker = None,
             Message::MoveToBoard(card, board) => {
@@ -573,15 +605,18 @@ impl App {
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
-                    self.selection = moved(board, self.selection, direction).or(self.selection);
+                    let shown = |card: &Card| self.shown(card);
+                    self.selection =
+                        moved(board, self.selection, direction, shown).or(self.selection);
                 }
                 return self.reveal_selection();
             }
             Message::MoveCard(direction) => {
                 self.commit_pending();
                 let target = self.board().zip(self.selection);
-                if let Some((card, column, index)) =
-                    target.and_then(|(board, selection)| card_move(board, selection, direction))
+                let shown = |card: &Card| self.shown(card);
+                if let Some((card, column, index)) = target
+                    .and_then(|(board, selection)| card_move(board, selection, direction, shown))
                 {
                     self.data.move_card(card, column, index);
                     self.selection = Some(Selection {
@@ -628,6 +663,7 @@ impl App {
                         (description::EDITOR, Input::Edit),
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
                         (labels::NEW_INPUT, Input::Edit),
+                        (filter::INPUT, Input::Filter),
                     ]
                     .into_iter()
                     .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
@@ -915,10 +951,10 @@ impl App {
             Target::Column(column) => (column, usize::MAX),
             _ => return,
         };
+        let cards = self.find_column(column).map_or(&[][..], |c| &c.cards);
+        let gap = filter::placement(cards, gap, |c| self.shown(c));
         // The Card leaves its own slot first, so a later gap in its Column moves up by one.
-        let from = self
-            .find_column(column)
-            .and_then(|c| c.cards.iter().position(|x| x.id == card));
+        let from = cards.iter().position(|x| x.id == card);
         let index = match from {
             Some(i) if i < gap => gap - 1,
             _ => gap,
@@ -946,6 +982,9 @@ impl App {
                     column: capture.column,
                     card: Some(card),
                 }); // new Cards become the selected Card
+                if self.filter.is_on() {
+                    self.filter_kept.push(card); // a Card just created stays visible
+                }
             }
             let board = self.board_of_column(capture.column);
             self.history.record(&self.data.boards, board, board);
@@ -1006,7 +1045,7 @@ impl App {
     }
 
     /// Scrolls the selected Column fully into view, and its Card into view within it.
-    fn reveal_selection(&self) -> Task<Message> {
+    pub(crate) fn reveal_selection(&self) -> Task<Message> {
         let Some(s) = self.selection else {
             return Task::none();
         };
@@ -1048,6 +1087,8 @@ impl App {
         self.board_menu = false;
         self.panel = None;
         self.archive = None;
+        self.clear_filter();
+        self.filter_menu = false;
     }
 
     /// Runs at the end of every `update`: Selection and panel are cleared when their Card is no
@@ -1062,6 +1103,7 @@ impl App {
         self.validate_selection();
         self.validate_archive();
         self.validate_labels();
+        self.validate_filter();
         self.validate_move();
         let on_board = |card: Id| {
             self.board().is_some_and(|b| {
@@ -1121,7 +1163,7 @@ impl App {
                     ..
                 }),
                 event::Status::Captured,
-            ) => Some(Message::Escape),
+            ) => Some(Message::LeaveField),
             _ => None,
         });
         let window = event::listen_with(|event, _status, _window| match event {
@@ -1314,6 +1356,7 @@ impl App {
         ]);
         let header = row![
             self.editable_name(Field::BoardName(board.id), &board.name, 20),
+            self.filter_bar(),
             button(text(format!("Archive ({})", board.archived_cards.len())))
                 .style(button::secondary)
                 .on_press(Message::OpenArchive),
@@ -1340,6 +1383,7 @@ impl App {
         });
         column![header]
             .extend(menu)
+            .extend(self.filter_lines(board))
             .push(
                 scrollable(row(columns).height(Fill))
                     .id(BOARD_SCROLL)
@@ -1361,7 +1405,9 @@ impl App {
             Some(Target::Column(column)) if column == col.id => Some(col.cards.len()),
             _ => None,
         };
-        let cards = col.cards.iter().enumerate().map(|(i, card)| {
+        // Hidden Cards are skipped but keep their index: drop slots are positions in all Cards.
+        let shown = col.cards.iter().enumerate().filter(|(_, c)| self.shown(c));
+        let cards = shown.map(|(i, card)| {
             let chips = self.board().and_then(|b| labels::chips(b, card));
             let card_box = container(
                 column![
@@ -1404,7 +1450,7 @@ impl App {
                 "Add Card (N)",
             ),
         };
-        let count = text(col.count_label());
+        let count = text(self.count_label(col));
         let count = if col.over_limit() {
             count.style(text::danger)
         } else {
@@ -1615,42 +1661,75 @@ fn card_widget(card: Id) -> widget::Id {
     widget::Id::from(format!("card-{card}"))
 }
 
-/// Where an arrow key takes the selection on `board`; `None` = stay put.
-fn moved(board: &Board, selection: Option<Selection>, direction: Direction) -> Option<Selection> {
+/// Where an arrow key takes the selection on `board`, counting only Cards `shown` by the
+/// Filter; `None` = stay put.
+fn moved(
+    board: &Board,
+    selection: Option<Selection>,
+    direction: Direction,
+    shown: impl Fn(&Card) -> bool,
+) -> Option<Selection> {
+    let visible = |column: &Column| -> Vec<Id> {
+        column
+            .cards
+            .iter()
+            .filter(|c| shown(c))
+            .map(|c| c.id)
+            .collect()
+    };
     let at = |column: &Column, index: Option<usize>| Selection {
         column: column.id,
-        card: index.and_then(|i| column.cards.get(i)).map(|card| card.id),
+        card: index.and_then(|i| visible(column).get(i).copied()),
     };
     let Some(selection) = selection else {
         return board.columns.first().map(|c| at(c, Some(0)));
     };
-    let (ci, index) = position(board, selection)?;
+    let ci = board
+        .columns
+        .iter()
+        .position(|c| c.id == selection.column)?;
     let column = &board.columns[ci];
+    let cards = visible(column);
+    let index = selection
+        .card
+        .and_then(|id| cards.iter().position(|c| *c == id));
     match direction {
         Direction::Up => Some(at(column, Some(index?.checked_sub(1)?))),
         Direction::Down => {
             let next = index.map_or(0, |i| i + 1);
-            (next < column.cards.len()).then(|| at(column, Some(next)))
+            (next < cards.len()).then(|| at(column, Some(next)))
         }
         Direction::Left | Direction::Right => {
             let next = match direction {
                 Direction::Left => board.columns.get(ci.checked_sub(1)?)?,
                 _ => board.columns.get(ci + 1)?,
             };
-            let i = index.unwrap_or(0).min(next.cards.len().saturating_sub(1));
+            let i = index
+                .unwrap_or(0)
+                .min(visible(next).len().saturating_sub(1));
             Some(at(next, Some(i)))
         }
     }
 }
 
 /// Where Ctrl+arrow moves the selected Card: (Card, Column, index). `None` = no Card or at an end.
-fn card_move(board: &Board, selection: Selection, direction: Direction) -> Option<(Id, Id, usize)> {
+/// Up/Down go just before the previous / just after the next Card `shown` by the Filter.
+fn card_move(
+    board: &Board,
+    selection: Selection,
+    direction: Direction,
+    shown: impl Fn(&Card) -> bool,
+) -> Option<(Id, Id, usize)> {
     let (ci, index) = position(board, selection)?;
     let (card, i) = (selection.card?, index?);
     let column = &board.columns[ci];
+    let cards = &column.cards;
     match direction {
-        Direction::Up => Some((card, column.id, i.checked_sub(1)?)),
-        Direction::Down => (i + 1 < column.cards.len()).then_some((card, column.id, i + 1)),
+        Direction::Up => Some((card, column.id, cards[..i].iter().rposition(&shown)?)),
+        Direction::Down => {
+            let next = i + 1 + cards[i + 1..].iter().position(&shown)?;
+            Some((card, column.id, next))
+        }
         Direction::Left => Some((card, board.columns.get(ci.checked_sub(1)?)?.id, usize::MAX)),
         Direction::Right => Some((card, board.columns.get(ci + 1)?.id, usize::MAX)),
     }
