@@ -170,3 +170,23 @@ fn the_header_menu_opens_and_esc_closes_it() {
     send(&mut app, [Message::Escape]);
     assert_eq!(app.limit_input, None);
 }
+
+#[test]
+fn undo_that_removes_a_column_closes_its_menu_and_limit_prompt() {
+    let mut app = app_with_board();
+    let board = app.data.boards[0].id;
+    send(&mut app, [Message::AddColumn(board)]);
+    let added = column_id(&app, 3);
+
+    send(
+        &mut app,
+        [Message::OpenLimit(added), Message::LimitChanged("4".into())],
+    );
+    undo(&mut app);
+    assert_eq!(app.data.boards[0].columns.len(), 3);
+    assert_eq!(app.limit_input, None, "its Column is gone");
+
+    send(&mut app, [Message::Redo, Message::ToggleColumnMenu(added)]);
+    undo(&mut app);
+    assert_eq!(app.column_menu, None, "its Column is gone");
+}

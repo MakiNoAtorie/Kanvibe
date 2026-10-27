@@ -234,10 +234,13 @@ impl Data {
     }
 
     /// The Board to show for `current`: itself while active; if archived or gone, the next
-    /// active Board below it, else the one above, else the first active one; `None` stays `None`.
+    /// active Board below it, else the one above, else the first active one. `None` (nothing
+    /// open) opens the first active Board once there is one (undo, restore).
     /// `order` is the Board IDs from before the change, used when `current` is gone.
     pub fn fallback(&self, current: Option<Id>, order: &[Id]) -> Option<Id> {
-        let current = current?;
+        let Some(current) = current else {
+            return self.boards.iter().find(|b| !b.archived).map(|b| b.id);
+        };
         if self.active_board(current).is_some() {
             return Some(current);
         }

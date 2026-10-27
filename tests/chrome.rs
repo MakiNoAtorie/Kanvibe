@@ -301,3 +301,18 @@ fn open_data_folder_command_targets_the_folder() {
     let command = chrome::open_command(std::path::Path::new("some/dir"));
     assert!(command.get_args().any(|a| a == "some/dir"));
 }
+
+#[test]
+fn minimising_a_maximised_window_keeps_the_restored_rectangle_and_the_flag() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = app_in(tmp.path());
+    place(&mut app, geometry(40.0, 50.0, 1000.0, 700.0), false);
+    place(&mut app, geometry(-8.0, -8.0, 1936.0, 1096.0), true);
+    // Minimised: Windows reports 0x0 at -32000,-32000, and no longer says maximised.
+    place(&mut app, geometry(-16000.0, -16000.0, 0.0, 0.0), false);
+    send(&mut app, [Message::ToggleTheme]);
+
+    let settings = saved_settings(tmp.path());
+    assert!(settings.maximized, "it comes back maximised");
+    assert_eq!(settings.window, Some(geometry(40.0, 50.0, 1000.0, 700.0)));
+}

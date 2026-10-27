@@ -417,6 +417,7 @@ impl App {
                 }
             }
             Message::CreateBoard => {
+                self.commit_pending(); // a Capture box opened under the prompt keeps its Card
                 let name = self.board_name.as_deref().unwrap_or_default();
                 if let Some(id) = self.data.create_board(name) {
                     self.current_board = Some(id);
@@ -677,11 +678,11 @@ impl App {
                 let focused = focused.and_then(input);
                 let dragging = self.drag.is_some();
                 let message = keys::map(&event, &Context { focused, dragging });
-                // A dialog leaves only Esc; the Archive view also Undo/Redo.
+                // A dialog leaves only Esc; the Archive view also Undo/Redo and F1.
                 let allowed = |m: &Message| match m {
                     Message::Escape => true,
                     _ if self.dialog_open() => false,
-                    Message::Undo | Message::Redo => true,
+                    Message::Undo | Message::Redo | Message::ShowShortcuts => true,
                     _ => self.archive.is_none(),
                 };
                 if let Some(message) = message.filter(allowed) {
@@ -1123,6 +1124,14 @@ impl App {
             self.left_board();
         }
         self.validate_selection();
+        // Undo or redo can take away the Column a ⋯ menu or limit prompt is open on.
+        let here = |c: &Id| {
+            self.data
+                .board_of_column(*c)
+                .is_some_and(|b| self.current_board == Some(b))
+        };
+        self.column_menu = self.column_menu.filter(here);
+        self.limit_input = self.limit_input.take().filter(|l| here(&l.column));
         self.validate_archive();
         self.validate_labels();
         self.validate_filter();

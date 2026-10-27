@@ -194,7 +194,7 @@ pub enum Rotation {
 
 /// Rotates the two backups beside the data file, if due. Call before every save, with
 /// `data_changed` when the save changes Board data. Due on the session's first data-changing
-/// save, and before any save once `.bak1` is older than 24 h. Steps: data file to `.bak1.tmp`, delete `.bak2`, `.bak1` to `.bak2`, `.bak1.tmp` to
+/// save, and before any save once `.bak1` is older than 24 h. Steps: data file to `.bak1.tmp`, delete `.bak2` and move `.bak1` to `.bak2` (only when `.bak1` reads), `.bak1.tmp` to
 /// `.bak1`. A failed rotation stays due, so the next save retries it.
 pub fn rotate(dir: &Path, rotation: &mut Rotation, data_changed: bool) -> io::Result<()> {
     let [bak1, bak2] = BACKUPS.map(|b| dir.join(b));
@@ -221,8 +221,9 @@ pub fn rotate(dir: &Path, rotation: &mut Rotation, data_changed: bool) -> io::Re
     out.write_all(&bytes)?;
     out.sync_all()?;
     drop(out);
-    remove_if_exists(&bak2)?;
-    if bak1.try_exists()? {
+    // An unreadable `.bak1` is only replaced: shifting it would push a readable `.bak2` out.
+    if fs::read(&bak1).is_ok_and(|b| parse(&b).is_ok()) {
+        remove_if_exists(&bak2)?;
         rename_with_retry(&bak1, &bak2)?;
     }
     rename_with_retry(&tmp, &bak1)?;

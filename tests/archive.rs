@@ -441,3 +441,28 @@ fn archived_cards_survive_a_save_and_load() {
     assert_eq!(data, app.data);
     assert_eq!(data.boards[0].archived_cards[0].card.title, "A");
 }
+
+#[test]
+fn opening_the_archive_view_closes_the_board_menu_and_labels_filter_list() {
+    let mut app = app_with_cards();
+    send(
+        &mut app,
+        [Message::ToggleBoardMenu, Message::ToggleFilterMenu],
+    );
+
+    send(&mut app, [Message::OpenArchive]);
+    assert!(
+        !app.board_menu && !app.filter_menu,
+        "they belong to the Columns view"
+    );
+    send(&mut app, [Message::Escape]);
+    assert_eq!(app.archive, None, "one Esc leaves the Archive view");
+}
+
+#[test]
+fn f1_still_opens_the_shortcuts_in_the_archive_view() {
+    let mut app = app_with_cards();
+    send(&mut app, [Message::OpenArchive]);
+    send(&mut app, [Message::KeyWithFocus(press(Named::F1), None)]);
+    assert!(app.shortcuts, "the footer button works there too");
+}

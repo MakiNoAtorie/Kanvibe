@@ -120,12 +120,14 @@ impl App {
         }
     }
 
-    /// Opens the Archive view in place of the Columns; the panel and selection belong to the
+    /// Opens the Archive view in place of the Columns; the panel, selection and menus belong to the
     /// Columns, so they close.
     pub(crate) fn open_archive(&mut self) {
         self.commit_pending();
         self.column_menu = None;
         self.limit_input = None;
+        self.board_menu = false;
+        self.filter_menu = false;
         self.panel = None;
         self.selection = None;
         self.archive = self.current_board;
