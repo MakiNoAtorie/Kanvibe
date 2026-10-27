@@ -125,8 +125,14 @@
 - Migration: pre-migration copy `kanvibe.v<old>.json` written at load with `create_new`; real migrations go in `storage::parse` before `FileIn`.
 - Tests: `tests/repair.rs` helpers `write(json)`, `load_repaired(json)`, `opened(screen)`.
 
+## Export / import (#24, `src/transfer.rs`)
+- `transfer::{export(path, &Board), file_name(name)}`, `Data::import_board(Board) -> Id`, `App::update_transfer` handles `ExportBoard(Id)`, `Exported(..)`, `ImportBoard`, `Imported(Option<Result<Vec<u8>, String>>)` (`None` = dialog cancelled; raw bytes so tests drive parsing through `update`).
+- `App.notice: Option<String>`: OK-only dimmed message (`view_notice`) for refusals/failures; while open only Esc maps.
+- Import repairs on a throwaway `Data` before remapping IDs; names from outside go through `Data::free_name` (" (n)" rule).
+- `tests/transfer.rs` helpers: `app_with_work()`, `shape(&Board)`, `ids`, `export`, `import(app, bytes)`, `refusal(bytes)`, `imported_name(existing, name)`.
+
 ## Esc order (current)
-- cancel drag → shortcuts overlay → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Archive view → panel → (filter) → selection.
+- cancel drag → shortcuts overlay → notice → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Archive view → panel → (filter) → selection.
 
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
