@@ -16,7 +16,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const BOARD_NAME_INPUT: &str = "board-name";
+pub(crate) const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
 pub(crate) const EDIT_INPUT: &str = "edit";
 const LIMIT_INPUT: &str = "limit";
@@ -55,6 +55,14 @@ pub struct App {
     /// The persistent bar: "Not saved: <path>: <OS error>". Cleared by a successful save.
     pub not_saved: Option<String>,
     pub closing: Closing,
+    /// The open confirmation overlay, if any.
+    pub confirm: Option<Confirm>,
+    /// The current Board's header ⋯ menu is open.
+    pub board_menu: bool,
+    /// The sidebar is a 40px rail. Saved in the settings.
+    pub sidebar_collapsed: bool,
+    /// The sidebar's "Archived (n)" section is expanded.
+    pub archived_open: bool,
     /// The Card the Card panel shows. It follows the selected Card; see `validate_ui`.
     pub panel: Option<Id>,
     /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
@@ -200,6 +208,24 @@ pub enum Message {
     /// `None` when the Save dialog was cancelled; `Err` holds the "Not saved" bar text.
     CopySaved(Option<Result<(), String>>),
     QuitWithoutSaving,
+    /// A Board row in the sidebar: switch to it. Archived Boards cannot be opened.
+    OpenBoard(Id),
+    /// "Archive Board" in the Board's ⋯ menu.
+    ArchiveBoard(Id),
+    /// Restore on an archived Board's sidebar row.
+    RestoreBoard(Id),
+    /// Delete on an archived Board's sidebar row: asks first.
+    AskDeleteBoard(Id),
+    /// Permanently deletes an archived Board.
+    DeleteBoard(Id),
+    /// The confirm button of the open [`Confirm`]: sends its action.
+    Confirm,
+    /// The ⋯ button in the Board header.
+    ToggleBoardMenu,
+    /// Collapse the sidebar to a rail, or expand it.
+    ToggleSidebar,
+    /// The "Archived (n)" heading in the sidebar.
+    ToggleArchivedBoards,
     /// Enter: open the Card panel on the selected Card.
     OpenPanel,
     /// The panel's X button.
@@ -218,10 +244,21 @@ pub enum Message {
     RemoveItem(Id),
 }
 
+/// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Confirm {
+    pub prompt: String,
+    pub action: Message,
+}
+
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let (board, order): (_, Vec<Id>) = (
+            self.current_board,
+            self.data.boards.iter().map(|b| b.id).collect(),
+        );
         let task = self.apply(message);
-        self.validate_ui();
+        self.validate_ui(board, &order);
         task
     }
 
@@ -271,6 +308,7 @@ impl App {
                 }
             }
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
+            Message::Escape if self.confirm.is_some() => self.confirm = None,
             Message::Escape => {
                 // One layer per press: the text field, the Card panel, then the selection.
                 if self.board_name.is_none()
@@ -278,6 +316,7 @@ impl App {
                     && self.editing.is_none()
                     && self.column_menu.is_none()
                     && self.limit_input.is_none()
+                    && !self.board_menu
                     && self.panel.take().is_none()
                 {
                     self.selection = None;
@@ -285,6 +324,7 @@ impl App {
                 self.board_name = None;
                 self.column_menu = None;
                 self.limit_input = None;
+                self.board_menu = false;
                 self.capture = None; // Esc discards the capture box; other fields commit.
                 self.commit_pending();
             }
@@ -423,6 +463,7 @@ impl App {
             }
             Message::StartEdit(field) => {
                 self.commit_pending();
+                self.board_menu = false;
                 let id = field.id();
                 if let Some(start) = self.data.name(id) {
                     self.editing = Some(PendingEdit {
@@ -539,6 +580,55 @@ impl App {
             }
             Message::CopySaved(Some(Err(e))) => self.not_saved = Some(e),
             Message::CopySaved(None) => {}
+            Message::OpenBoard(board) => {
+                self.commit_pending();
+                if self.data.active_board(board).is_some() {
+                    self.current_board = Some(board);
+                }
+            }
+            Message::ArchiveBoard(board) => {
+                self.commit_pending();
+                if self.data.archive_board(board).is_some() {
+                    self.history.record(&self.data.boards, None, None);
+                }
+            }
+            Message::AskDeleteBoard(id) => {
+                if let Some(board) = self.data.boards.iter().find(|b| b.id == id && b.archived) {
+                    // ponytail: archived Cards arrive with #11; count them here then.
+                    let cards: usize = board.columns.iter().map(|c| c.cards.len()).sum();
+                    let plural = if cards == 1 { "" } else { "s" };
+                    let prompt = format!(
+                        "Permanently delete Board \"{}\" with {cards} Card{plural} (0 archived)? \
+                         You can undo this until Kanvibe closes.",
+                        board.name
+                    );
+                    let action = Message::DeleteBoard(id);
+                    self.confirm = Some(Confirm { prompt, action });
+                }
+            }
+            Message::DeleteBoard(board) => {
+                self.commit_pending();
+                if self.data.delete_board(board).is_some() {
+                    self.history.record(&self.data.boards, None, None);
+                }
+            }
+            Message::ToggleSidebar => self.sidebar_collapsed = !self.sidebar_collapsed,
+            Message::ToggleArchivedBoards => self.archived_open = !self.archived_open,
+            Message::ToggleBoardMenu => {
+                self.commit_pending();
+                self.board_menu = !self.board_menu;
+            }
+            Message::Confirm => {
+                if let Some(confirm) = self.confirm.take() {
+                    return self.update(confirm.action);
+                }
+            }
+            Message::RestoreBoard(board) => {
+                self.commit_pending();
+                if self.data.restore_board(board).is_some() {
+                    self.history.record(&self.data.boards, None, None);
+                }
+            }
         }
         Task::none()
     }
@@ -639,9 +729,25 @@ impl App {
         });
     }
 
+    /// After any Board switch: each Board opens clean.
+    fn left_board(&mut self) {
+        self.selection = None;
+        self.capture = None;
+        self.column_menu = None;
+        self.limit_input = None;
+        self.board_menu = false;
+        self.panel = None;
+    }
+
     /// Runs at the end of every `update`: Selection and panel are cleared when their Card is no
     /// longer an active Card on the current Board, and an open panel follows the selected Card.
-    fn validate_ui(&mut self) {
+    /// The current Board is never archived or gone: it falls back to the next active Board
+    /// below, else above (positions from `order`, the Board IDs before the update).
+    fn validate_ui(&mut self, board: Option<Id>, order: &[Id]) {
+        self.current_board = self.data.fallback(self.current_board, order);
+        if self.current_board != board {
+            self.left_board();
+        }
         self.validate_selection();
         let on_board = |card: Id| {
             self.board().is_some_and(|b| {
@@ -766,6 +872,10 @@ impl App {
             Some(board) => self.view_board(board),
             None => self.view_empty(),
         };
+        let content: Element<_> = match self.data.boards.is_empty() {
+            true => content, // first run: only "Create your first Board"
+            false => row![crate::sidebar::view(self), content].into(),
+        };
         // The panel pushes the Board narrower; it never overlays it.
         let content: Element<_> = match self.panel.and_then(|id| self.data.card(id)) {
             Some(card) => row![container(content).width(Fill), self.view_panel(card)].into(),
@@ -786,7 +896,10 @@ impl App {
             Closing::Asking | Closing::Waiting if self.not_saved.is_some() => {
                 stack![content, self.view_close_dialog()].into()
             }
-            _ => content,
+            _ => match &self.confirm {
+                Some(confirm) => stack![content, view_confirm(confirm)].into(),
+                None => content,
+            },
         }
     }
 
@@ -807,11 +920,7 @@ impl App {
         ]
         .spacing(12)
         .max_width(560);
-        let dim = |_: &iced::Theme| container::Style {
-            background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
-            ..Default::default()
-        };
-        opaque(center(container(panel).padding(20).style(container::rounded_box)).style(dim))
+        dialog(panel)
     }
 
     fn view_board<'a>(&'a self, board: &'a Board) -> Element<'a, Message> {
@@ -823,16 +932,37 @@ impl App {
                 .style(button::secondary)
                 .on_press(Message::AddColumn(board.id))
                 .into()]);
-        column![
+        let header = row![
             self.editable_name(Field::BoardName(board.id), &board.name, 20),
-            scrollable(row(columns).spacing(12).height(Fill))
-                .id(BOARD_SCROLL)
-                .horizontal()
-                .height(Fill),
+            button("⋯")
+                .style(button::text)
+                .on_press(Message::ToggleBoardMenu),
         ]
-        .spacing(12)
-        .padding(12)
-        .into()
+        .spacing(8)
+        .align_y(Center);
+        let menu = self.board_menu.then(|| {
+            row![
+                button("Rename")
+                    .style(button::secondary)
+                    .on_press(Message::StartEdit(Field::BoardName(board.id))),
+                button("Archive Board")
+                    .style(button::secondary)
+                    .on_press(Message::ArchiveBoard(board.id)),
+            ]
+            .spacing(8)
+            .into()
+        });
+        column![header]
+            .extend(menu)
+            .push(
+                scrollable(row(columns).spacing(12).height(Fill))
+                    .id(BOARD_SCROLL)
+                    .horizontal()
+                    .height(Fill),
+            )
+            .spacing(12)
+            .padding(12)
+            .into()
     }
 
     fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
@@ -933,12 +1063,47 @@ impl App {
             ]
             .spacing(8)
             .into(),
-            None => button("Create your first Board")
+            None if self.data.boards.is_empty() => button("Create your first Board")
                 .on_press(Message::NewBoard)
                 .into(),
+            None => column![
+                text("No open Boards").size(20),
+                button("+ New Board").on_press(Message::NewBoard)
+            ]
+            .spacing(12)
+            .align_x(Center)
+            .into(),
         };
         center(content).into()
     }
+}
+
+/// A confirmation: the question, Cancel (as Esc) and the confirm button.
+fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
+    let buttons = row![
+        button("Cancel")
+            .style(button::secondary)
+            .on_press(Message::Escape),
+        button("Delete")
+            .style(button::danger)
+            .on_press(Message::Confirm),
+    ]
+    .spacing(8);
+    dialog(
+        column![text(&confirm.prompt), buttons]
+            .spacing(12)
+            .max_width(480),
+    )
+}
+
+/// An overlay panel over the dimmed app, blocking clicks to what is below.
+fn dialog<'a>(panel: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    let dim = |_: &iced::Theme| container::Style {
+        background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+        ..Default::default()
+    };
+    let panel = container(panel).padding(20).style(container::rounded_box);
+    opaque(center(panel).style(dim))
 }
 
 /// The scroll offset that brings `start..start + len` into a `viewport`-long view currently
@@ -1082,11 +1247,11 @@ impl App {
     pub fn open(dir: PathBuf) -> Result<App, storage::LoadError> {
         fs::create_dir_all(&dir).map_err(storage::LoadError::Io)?;
         let (data, settings) = storage::load(&dir)?.unwrap_or_default();
-        let current_board = settings
-            .last_board
-            .filter(|id| data.boards.iter().any(|b| b.id == *id))
-            .or(data.boards.first().map(|b| b.id));
+        let ids: Vec<Id> = data.boards.iter().map(|b| b.id).collect();
+        let last = settings.last_board.or(ids.first().copied());
+        let current_board = data.fallback(last, &ids);
         Ok(App {
+            sidebar_collapsed: settings.sidebar_collapsed,
             saved: (data.clone(), settings),
             data,
             current_board,
@@ -1142,6 +1307,7 @@ impl App {
     fn settings(&self) -> Settings {
         Settings {
             last_board: self.current_board,
+            sidebar_collapsed: self.sidebar_collapsed,
         }
     }
 }

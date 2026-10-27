@@ -22,6 +22,7 @@ const STALE: Duration = Duration::from_secs(24 * 3600);
 pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_board: Option<Id>,
+    pub sidebar_collapsed: bool,
 }
 
 #[derive(Serialize)]

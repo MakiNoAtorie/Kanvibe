@@ -4,5 +4,6 @@ pub mod domain;
 pub mod history;
 pub mod keys;
 pub mod panel;
+pub mod sidebar;
 pub mod startup;
 pub mod storage;
