@@ -9,6 +9,8 @@ use crate::app::{Direction, Message};
 pub struct Context {
     /// The text field that has keyboard focus, if any.
     pub focused: Option<Input>,
+    /// A press or drag is in progress: Esc cancels it, other keys do nothing.
+    pub dragging: bool,
 }
 
 /// The app's text boxes (one widget Id each).
@@ -34,6 +36,9 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
     else {
         return None;
     };
+    if context.dragging {
+        return (*key == Key::Named(Named::Escape)).then_some(Message::DragCancel);
+    }
     let ctrl = modifiers.command();
     let typing = context.focused.is_some();
     match (ctrl, key.to_latin(*physical_key)) {

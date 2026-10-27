@@ -1,5 +1,6 @@
 pub mod app;
 pub mod domain;
+pub mod drag;
 pub mod history;
 pub mod keys;
 pub mod startup;
