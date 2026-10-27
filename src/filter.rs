@@ -6,7 +6,7 @@ use iced::widget::{button, container, operation, row, text, text_input};
 use iced::{Center, Element, Task};
 
 use crate::app::{App, Message, Selection};
-use crate::domain::{Board, Card, Column, Id};
+use crate::domain::{Board, Card, Column, Id, Label};
 
 /// The filter box's widget Id.
 pub const INPUT: &str = "filter";
@@ -26,11 +26,16 @@ impl Filter {
     }
 
     /// Whether `card` passes both the text and the Labels (an off Filter passes everything).
-    pub fn matches(&self, card: &Card) -> bool {
+    /// The text also matches the names of the Card's Labels among `labels` (its Board's).
+    pub fn matches(&self, card: &Card, labels: &[Label]) -> bool {
         let text = self.text.trim().to_lowercase();
+        let label_names = labels.iter().filter(|l| card.labels.contains(&l.id));
         let text_ok = text.is_empty()
             || card.title.to_lowercase().contains(&text)
-            || card.description.to_lowercase().contains(&text);
+            || card.description.to_lowercase().contains(&text)
+            || label_names
+                .into_iter()
+                .any(|l| l.name.to_lowercase().contains(&text));
         let labels_ok =
             self.labels.is_empty() || card.labels.iter().any(|l| self.labels.contains(l));
         text_ok && labels_ok
@@ -102,12 +107,11 @@ impl App {
 
     /// The Filter is on and no Card of the current Board matches it: "No Cards match".
     pub fn nothing_matches(&self) -> bool {
-        let mut cards = self
-            .board()
-            .into_iter()
-            .flat_map(|b| &b.columns)
-            .flat_map(|c| &c.cards);
-        self.filter.is_on() && !cards.any(|c| self.filter.matches(c))
+        let Some(board) = self.board() else {
+            return false;
+        };
+        let mut cards = board.columns.iter().flat_map(|c| &c.cards);
+        self.filter.is_on() && !cards.any(|c| self.filter.matches(c, &board.labels))
     }
 
     /// The Board header's filter controls: the text box with ×, and the Labels button.
@@ -196,7 +200,8 @@ impl App {
     /// Whether `card` shows on the Board: it matches the Filter, or is the selected Card, or was
     /// created while the Filter is on.
     pub fn shown(&self, card: &Card) -> bool {
-        self.filter.matches(card)
+        self.filter
+            .matches(card, self.board().map_or(&[], |b| &b.labels))
             || self.selection.and_then(|s| s.card) == Some(card.id)
             || self.filter_kept.contains(&card.id)
     }

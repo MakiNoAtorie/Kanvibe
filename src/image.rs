@@ -92,13 +92,19 @@ pub fn render(board: &Board, filter: &Filter, theme: &Theme) -> Result<Vec<u8>, 
 /// Bottom padding is left off (the crop adds it back), so an overflow reaches the last row.
 fn view(s: &Snapshot) -> Element<'_, Message> {
     let columns = s.board.columns.iter().map(|col| {
-        let count = text(s.filter.count_label(col, |c| s.filter.matches(c)));
+        let count = text(
+            s.filter
+                .count_label(col, |c| s.filter.matches(c, &s.board.labels)),
+        );
         let count = match col.over_limit() {
             true => count.style(text::danger),
             false => count,
         };
         let header = row![text(&col.name).size(16).width(Fill), count].spacing(8);
-        let cards = col.cards.iter().filter(|c| s.filter.matches(c));
+        let cards = col
+            .cards
+            .iter()
+            .filter(|c| s.filter.matches(c, &s.board.labels));
         let cards = cards.map(|c| {
             card_face(Some(&s.board), c)
                 .style(container::bordered_box)
