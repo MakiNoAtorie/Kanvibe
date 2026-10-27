@@ -90,6 +90,8 @@ pub struct App {
     pub editor: text_editor::Content,
     /// The open Card's description as last parsed for the rendered view: (source, parsed).
     pub rendered: (String, iced::widget::markdown::Content),
+    /// A message over the dimmed app with only OK (an import refused, an export failed).
+    pub notice: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +346,14 @@ pub enum Message {
     OpenLink(String),
     /// A click no widget took while the description editor is open: leave the editor.
     ClickOutside,
+    /// "Export Board…" in the Board's ⋯ menu: the native Save dialog, then the file is written.
+    ExportBoard(Id),
+    /// `None` when the Save dialog was cancelled; `Err` holds the message to show.
+    Exported(Option<Result<(), String>>),
+    /// "Import Board…" in the sidebar footer: the native Open dialog, then the file is read.
+    ImportBoard,
+    /// The picked file's bytes; `None` when the dialog was cancelled, `Err` when it can't be read.
+    Imported(Option<Result<Vec<u8>, String>>),
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -412,6 +422,7 @@ impl App {
             }
             Message::Escape if self.drag.is_some() => self.drag = None, // first Esc layer
             Message::Escape if self.shortcuts => self.shortcuts = false,
+            Message::Escape if self.notice.is_some() => self.notice = None,
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape if self.confirm.is_some() => self.confirm = None,
             Message::Escape if self.label_picker.is_some() => self.escape_labels(),
@@ -555,6 +566,10 @@ impl App {
                 self.move_to_board(card, board);
                 return self.reveal_selection();
             }
+            Message::ExportBoard(_)
+            | Message::Exported(_)
+            | Message::ImportBoard
+            | Message::Imported(_) => return self.update_transfer(message),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -626,6 +641,7 @@ impl App {
                     Message::Undo | Message::Redo => self.confirm.is_none(),
                     _ => self.archive.is_none() && self.confirm.is_none(),
                 };
+                let message = message.filter(|m| *m == Message::Escape || self.notice.is_none());
                 if let Some(message) = message.filter(allowed) {
                     return self.update(message);
                 }
@@ -1236,6 +1252,9 @@ impl App {
         if self.shortcuts {
             return stack![content, self.view_shortcuts()].into();
         }
+        if let Some(notice) = self.view_notice() {
+            return stack![content, notice].into();
+        }
         match self.closing {
             Closing::Asking | Closing::Waiting if self.not_saved.is_some() => {
                 stack![content, self.view_close_dialog()].into()
@@ -1309,6 +1328,9 @@ impl App {
                 button("Rename")
                     .style(button::secondary)
                     .on_press(Message::StartEdit(Field::BoardName(board.id))),
+                button("Export Board…")
+                    .style(button::secondary)
+                    .on_press(Message::ExportBoard(board.id)),
                 button("Archive Board")
                     .style(button::secondary)
                     .on_press(Message::ArchiveBoard(board.id)),

@@ -83,6 +83,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
             row![space::horizontal(), toggle("«")],
             scrollable(list.spacing(12)).height(Fill),
             footer,
+            button("Import Board…")
+                .style(button::text)
+                .on_press(Message::ImportBoard),
             crate::chrome::footer(app),
         ]
         .spacing(8),

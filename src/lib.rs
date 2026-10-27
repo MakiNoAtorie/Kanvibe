@@ -14,3 +14,4 @@ pub mod repair;
 pub mod sidebar;
 pub mod startup;
 pub mod storage;
+pub mod transfer;
