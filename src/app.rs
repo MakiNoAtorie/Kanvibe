@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
-const EDIT_INPUT: &str = "edit";
+pub(crate) const EDIT_INPUT: &str = "edit";
 const LIMIT_INPUT: &str = "limit";
 /// How long after the last keystroke a pending edit's live text is written to disk.
 const IDLE_WRITE: Duration = Duration::from_secs(1);
@@ -140,12 +140,16 @@ pub enum Field {
     BoardName(Id),
     ColumnName(Id),
     CardTitle(Id),
+    ChecklistItem(Id),
 }
 
 impl Field {
     fn id(self) -> Id {
         match self {
-            Field::BoardName(id) | Field::ColumnName(id) | Field::CardTitle(id) => id,
+            Field::BoardName(id)
+            | Field::ColumnName(id)
+            | Field::CardTitle(id)
+            | Field::ChecklistItem(id) => id,
         }
     }
 }
@@ -263,6 +267,16 @@ pub enum Message {
     AskDelete(Id),
     /// Permanently deletes an archived Card (the action of its [`Confirm`]).
     DeleteCard(Id),
+    /// "Add item" in the Card's Checklist: a blank Item at the end, in edit.
+    AddItem(Id),
+    /// Enter in an Item: commit it and, unless it was blank, add one below.
+    SubmitItem(Id),
+    ToggleItem(Id),
+    /// The ▲ / ▼ buttons (`Up` or `Down`).
+    MoveItem(Id, Direction),
+    /// Ctrl+Up / Ctrl+Down in the Item being edited.
+    MoveEditedItem(Direction),
+    RemoveItem(Id),
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -398,6 +412,44 @@ impl App {
             Message::Restore(card) => self.restore_card(card),
             Message::AskDelete(card) => self.ask_delete(card),
             Message::DeleteCard(card) => self.delete_card(card),
+            Message::AddItem(card) => {
+                self.commit_pending();
+                return self.add_item(card, None);
+            }
+            Message::SubmitItem(item) => {
+                let card = self.data.card_of_item(item);
+                let blank = self
+                    .editing
+                    .as_ref()
+                    .is_none_or(|e| e.text.trim().is_empty());
+                self.commit_pending();
+                if let Some(card) = card.filter(|_| !blank && self.data.item(item).is_some()) {
+                    return self.add_item(card, Some(item));
+                }
+            }
+            Message::ToggleItem(item) => {
+                self.commit_pending();
+                self.change_checklist(item, |data| data.toggle_item(item));
+            }
+            Message::MoveItem(item, direction) => {
+                let field = Field::ChecklistItem(item);
+                let was_editing = self.editing.as_ref().is_some_and(|e| e.field == field);
+                self.commit_pending();
+                let by = if direction == Direction::Up { -1 } else { 1 };
+                self.change_checklist(item, |data| data.move_item(item, by));
+                if was_editing && self.data.item(item).is_some() {
+                    return self.update(Message::StartEdit(field));
+                }
+            }
+            Message::MoveEditedItem(direction) => {
+                if let Some(Field::ChecklistItem(item)) = self.editing.as_ref().map(|e| e.field) {
+                    return self.update(Message::MoveItem(item, direction));
+                }
+            }
+            Message::RemoveItem(item) => {
+                self.commit_pending();
+                self.change_checklist(item, |data| data.remove_item(item));
+            }
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -441,6 +493,10 @@ impl App {
                     .map(move |focused| Message::KeyWithFocus(event.clone(), focused));
             }
             Message::KeyWithFocus(event, focused) => {
+                let item_or_edit = match self.editing.as_ref().map(|e| e.field) {
+                    Some(Field::ChecklistItem(_)) => Input::Item,
+                    _ => Input::Edit,
+                };
                 let input = |target: selector::Target| {
                     let selector::Target::Focusable { id: Some(id), .. } = target else {
                         return None;
@@ -448,7 +504,7 @@ impl App {
                     [
                         (BOARD_NAME_INPUT, Input::BoardName),
                         (CAPTURE_INPUT, Input::Capture),
-                        (EDIT_INPUT, Input::Edit),
+                        (EDIT_INPUT, item_or_edit),
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
                     ]
                     .into_iter()
@@ -730,6 +786,19 @@ impl App {
             let board = match edit.field {
                 Field::BoardName(_) => None,
                 Field::ColumnName(column) => self.board_of_column(column),
+                Field::ChecklistItem(item) => {
+                    let card = self.data.card_of_item(item);
+                    if edit.text.trim().is_empty() {
+                        // A blank Item is removed; one that was never non-blank leaves no trace.
+                        self.data.remove_item(item);
+                        if !edit.start.is_empty() {
+                            card.inspect(|c| self.data.touch(*c));
+                        }
+                    } else if self.data.name(item) != Some(edit.start.as_str()) {
+                        card.inspect(|c| self.data.touch(*c));
+                    }
+                    card.and_then(|c| self.board_of_card(c))
+                }
                 Field::CardTitle(card) => {
                     if self.data.name(card) != Some(edit.start.as_str()) {
                         self.data.touch(card); // a changed title is the Card's own change
@@ -737,6 +806,26 @@ impl App {
                     self.board_of_card(card)
                 }
             };
+            self.history.record(&self.data.boards, board, board);
+        }
+    }
+
+    /// Adds a blank Item to the Card and opens it for typing; the add is recorded on commit.
+    fn add_item(&mut self, card: Id, after: Option<Id>) -> Task<Message> {
+        match self.data.add_item(card, after) {
+            Some(item) => self.update(Message::StartEdit(Field::ChecklistItem(item))),
+            None => Task::none(),
+        }
+    }
+
+    /// Applies a Checklist change to the Item's Card as one undo step.
+    fn change_checklist(&mut self, item: Id, change: impl FnOnce(&mut Data) -> Option<()>) {
+        let Some(card) = self.data.card_of_item(item) else {
+            return;
+        };
+        if change(&mut self.data).is_some() {
+            self.data.touch(card);
+            let board = self.board_of_card(card);
             self.history.record(&self.data.boards, board, board);
         }
     }
@@ -1050,14 +1139,16 @@ impl App {
             _ => None,
         };
         let cards = col.cards.iter().enumerate().map(|(i, card)| {
-            let card_box = container(text(&card.title))
-                .id(card_widget(card.id))
-                .width(Fill)
-                .padding(8)
-                .style(outlined(
-                    container::bordered_box,
-                    selection.is_some_and(|s| s.card == Some(card.id)),
-                ));
+            let card_box = container(
+                column![text(&card.title)].extend(card.progress().map(|p| text(p).size(12).into())),
+            )
+            .id(card_widget(card.id))
+            .width(Fill)
+            .padding(8)
+            .style(outlined(
+                container::bordered_box,
+                selection.is_some_and(|s| s.card == Some(card.id)),
+            ));
             // Indicator above, padding below: Card slots touch, so no gap between them
             // falls through to the Column body.
             let slot = container(column![drag::indicator(gap == Some(i)), card_box].spacing(2))

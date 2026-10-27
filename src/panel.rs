@@ -43,6 +43,7 @@ impl App {
                     .style(button::secondary)
                     .on_press(Message::ArchiveCard(card.id)),
                 text(times).size(12),
+                self.view_checklist(card),
             ]
             .spacing(12),
         )
