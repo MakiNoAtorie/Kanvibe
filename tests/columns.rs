@@ -190,3 +190,20 @@ fn undo_that_removes_a_column_closes_its_menu_and_limit_prompt() {
     undo(&mut app);
     assert_eq!(app.column_menu, None, "its Column is gone");
 }
+
+#[test]
+fn a_refused_limit_says_why_until_the_text_changes() {
+    const WHY: &str = "Enter a whole number of 1 or more, or leave blank to remove";
+    let mut app = app_with_board();
+    let to_do = column_id(&app, 0);
+    send(&mut app, [Message::OpenLimit(to_do)]);
+    assert!(iced_test::simulator(app.view()).find(WHY).is_err());
+    send(
+        &mut app,
+        [Message::LimitChanged("0".into()), Message::SubmitLimit],
+    );
+    assert!(app.limit_input.as_ref().unwrap().refused);
+    assert!(iced_test::simulator(app.view()).find(WHY).is_ok());
+    send(&mut app, [Message::LimitChanged("3".into())]);
+    assert!(!app.limit_input.as_ref().unwrap().refused);
+}

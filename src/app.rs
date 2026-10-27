@@ -121,6 +121,8 @@ pub enum Direction {
 pub struct LimitInput {
     pub column: Id,
     pub text: String,
+    /// The last submit was refused; the prompt says why until the text changes.
+    pub refused: bool,
 }
 
 /// The window close: the app waits for the save, asks when it fails, then exits.
@@ -810,21 +812,29 @@ impl App {
                 self.column_menu = None;
                 if let Some(col) = self.data.column(column) {
                     let text = col.limit.map(|l| l.to_string()).unwrap_or_default();
-                    self.limit_input = Some(LimitInput { column, text });
+                    self.limit_input = Some(LimitInput {
+                        column,
+                        text,
+                        refused: false,
+                    });
                     return operation::focus(LIMIT_INPUT);
                 }
             }
             Message::LimitChanged(text) => {
                 if let Some(input) = &mut self.limit_input {
                     input.text = text;
+                    input.refused = false;
                 }
             }
             Message::SubmitLimit => {
-                if let Some(LimitInput { column, text }) = self.limit_input.clone()
-                    && self.data.set_limit(column, &text).is_some()
-                {
-                    self.limit_input = None;
-                    self.record_step(self.data.board_of_column(column));
+                if let Some(LimitInput { column, text, .. }) = self.limit_input.clone() {
+                    match self.data.set_limit(column, &text) {
+                        Some(()) => {
+                            self.limit_input = None;
+                            self.record_step(self.data.board_of_column(column));
+                        }
+                        None => self.limit_input.as_mut().expect("open").refused = true,
+                    }
                 }
             }
             Message::CopySaved(Some(Err(e))) => self.not_saved = Some(e),
@@ -1507,11 +1517,20 @@ impl App {
         let header = drag::source(header, item);
         let menu: Option<Element<_>> = match &self.limit_input {
             Some(input) if input.column == col.id => Some(
-                text_input("Limit (blank removes)", &input.text)
-                    .id(LIMIT_INPUT)
-                    .on_input(Message::LimitChanged)
-                    .on_submit(Message::SubmitLimit)
-                    .into(),
+                column![
+                    text_input("Limit (blank removes)", &input.text)
+                        .id(LIMIT_INPUT)
+                        .on_input(Message::LimitChanged)
+                        .on_submit(Message::SubmitLimit)
+                ]
+                .extend(input.refused.then(|| {
+                    text("Enter a whole number of 1 or more, or leave blank to remove")
+                        .size(12)
+                        .style(text::danger)
+                        .into()
+                }))
+                .spacing(4)
+                .into(),
             ),
             _ if self.column_menu == Some(col.id) => Some(
                 column![
