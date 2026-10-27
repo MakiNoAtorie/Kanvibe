@@ -23,6 +23,21 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_board: Option<Id>,
     pub sidebar_collapsed: bool,
+    /// The dark theme; light by default.
+    pub dark: bool,
+    /// The window's restored (neither minimised nor maximised) rectangle, in logical pixels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<Geometry>,
+    pub maximized: bool,
+}
+
+/// A window or monitor rectangle in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Geometry {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Serialize)]

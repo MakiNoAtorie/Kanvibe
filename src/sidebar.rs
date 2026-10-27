@@ -60,7 +60,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         column![
             row![space::horizontal(), toggle("«")],
             scrollable(list.spacing(12)).height(Fill),
-            footer
+            footer,
+            crate::chrome::footer(app),
         ]
         .spacing(8),
     )
