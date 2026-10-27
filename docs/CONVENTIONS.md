@@ -71,6 +71,48 @@
 - `view` wraps the Board as `row![container(board).width(Fill), panel]` before the Not saved bar.
 - Tests setting timestamps directly reset `app.history = Default::default()`; use `OLD = "2020-01-01T00:00:00Z"`. `tests/panel.rs` helpers: `app_with_cards()`, `card(app, title)`, `updated(app, title)`, `click(app, title)`.
 
+## Boards and sidebar (#12, `src/sidebar.rs`)
+- Domain: `Board.archived`; `Data::{active_board, archive_board, restore_board, delete_board, fallback(current, order)}`. Restore moves the Board to the end; delete only works on archived Boards.
+- `validate_ui(&mut self, board_before, order)`: runs the fallback, then `left_board()` when the current Board changed. Any new per-Board UI state (Filter, ...) must be cleared in `left_board()`.
+- Shared confirmation: `App.confirm = Some(Confirm { prompt, action })`; Delete sends `Message::Confirm` (runs `action` through `update`); Cancel/Esc close. `app::dialog(panel)` (`pub(crate)`) is the dimmed centred overlay for any dialog.
+- `sidebar::board_row(board, current)` is the row to wrap as a drop target (#16/#17). `Settings.sidebar_collapsed`; `Settings` literals in tests need `..Settings::default()`.
+- `tests/boards.rs` helpers: `app_with_boards()` (A, B, C; C current), `names`, `archived`, `asking_to_delete_a()`, `send_saving`.
+
+## Archive (#11, `src/archive.rs`)
+- `Board.archived_cards: Vec<Archived { card, column_id, archived_at }>`, oldest first; `archive::rows(&Board)` newest first with Column name or "removed Column". `Data::{archive_card, remove_column, restore_card, delete_archived}`.
+- `App.archive: Option<Id>` (Board whose Archive view is open); `validate_archive` in `validate_ui`. Permanent delete uses `App.confirm` with action `Message::DeleteCard(Id)`.
+- A Card leaving the Board (archive, Move to Board) sets the selection to its neighbour and `panel = None` explicitly.
+- Column ⋯ menu is `column![Set limit…, Remove Column (...)]`; Board header row `[name, Archive (n), ...]` is where filter/⋯ go.
+
+## Drag (#15, `src/drag.rs`)
+- `Item::Card(Id)`, `Target::{Card { column, index }, Column(Id)}`, `Drag { item, origin, cursor, started, hovered }`. #16/#17 add `Item`/`Target` variants and an arm in `DragEnd`'s `match (drag.item, drag.target())`.
+- Messages `DragPress(Item)`, `DragMoved(Point)`, `DragHover(Target)`, `DragLeave(Target)`, `DragEnd`, `DragCancel`, `DragTick`. Press commits the pending edit; release under 5px is a click (`Select`).
+- `Target::Card { column, index }` = slot before the Card at `index`. Drop: `move_card`, `validate_selection`, `history.record`.
+- `drag::target(area, t, dragging)` adds enter/move/exit only while dragging; `hovered` lists all targets, `target()` prefers a Card slot. `keys::Context.dragging`: Esc → `DragCancel`, other keys nothing.
+
+## Checklists (#14, `src/checklist.rs`)
+- `Card.checklist: Vec<Item { id, text, done }>`; `Card::progress()`. `Data::{item, card_of_item, add_item, toggle_item, move_item, remove_item}` never touch `updated`; `App::change_checklist(item, op)` touches and records.
+- `AddItem`/`SubmitItem` open a blank Item as `Field::ChecklistItem` with no step; the commit records it; `commit_pending` removes a blank Item. `keys::Input::Item`; Ctrl+Up/Down → `MoveEditedItem`.
+
+## Labels (#13, `src/labels.rs`)
+- `PALETTE: [(key, Color); 10]`, `swatch(key)` (unknown key → first colour), `chips(board, card)`, `delete_prompt`. Label `Data` ops live in labels.rs (`add_label`, `toggle_label`, `delete_label`, `label_use`, `label_clash`, ...); they cover archived Cards too. `Data::new_id` is `pub(crate)`.
+- Filter reuse: `App::picker_rows(board, checked, toggle, editing: Option<&LabelPicker>)`; `None` = checkboxes only.
+- `App.label_picker` overlay; `validate_labels` in `validate_ui`. Attach/detach/delete touch Cards; rename/recolour don't.
+
+## Chrome (#23, `src/chrome.rs`)
+- `App.dark`, `App::theme()`, `App::highlighter_theme()`; `Settings.{dark, window: Option<Geometry>, maximized}`.
+- Window geometry never triggers saves: compare saved state only with private `same(a, b)` in app.rs, never `==`.
+- Every shortcut needs a row in `chrome::SHORTCUTS` as well as `keys::map`. `chrome::tip(widget, "Label (Key)")` for tooltips.
+
+## Description (#9, `src/description.rs`)
+- `Field::Description(card)`; `App.editor: text_editor::Content` mirrors `PendingEdit.text`; blank allowed. `Data::{description, set_description}`.
+- Messages `EditDescription`, `DescriptionAction`, `Format(Markup)`, `OpenLink`, `ClickOutside` (whole-view mouse_area; commits only a description edit).
+- `App.rendered` caches parsed markdown; `refresh_rendered()` runs after `validate_ui`. `open_link` is the only `webbrowser` call; `opens_in_browser` allows http/https/mailto.
+- Card face: title row (+ description icon), Label chips, Checklist progress.
+
+## Esc order (current)
+- cancel drag → shortcuts overlay → close dialog → confirm → text field / limit / Board menu → Archive view → panel → (filter) → selection.
+
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.
