@@ -54,6 +54,8 @@ pub enum Target {
     ColumnGap(usize),
     /// The gap before the active Board at `.0` in the sidebar (`len` = after the last).
     BoardGap(usize),
+    /// A sidebar Board row other than the current one: moves the Card to that Board.
+    Board(Id),
 }
 
 /// A press on an item: a drag once the cursor has moved [`THRESHOLD`] px.

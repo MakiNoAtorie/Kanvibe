@@ -78,6 +78,8 @@ pub struct App {
     pub archive: Option<Id>,
     /// The Label picker over the open Card's panel; see `labels`.
     pub label_picker: Option<LabelPicker>,
+    /// The "Move to Board…" picker for this Card; see `move_board`.
+    pub move_picker: Option<Id>,
     /// The dark theme. Saved in the settings.
     pub dark: bool,
     /// Window geometry and the maximised flag. Saved with the next save, never a save on its own.
@@ -300,6 +302,11 @@ pub enum Message {
     /// L, or a click on the panel's Labels row: open the Label picker.
     OpenLabels,
     CloseLabels,
+    /// M, or "Move to Board…" in the panel: open the Board picker.
+    OpenMove,
+    CloseMove,
+    /// A Board in the picker, or a drop on a sidebar Board: move the Card there.
+    MoveToBoard(Id, Id),
     /// A picker checkbox: attach or detach the Label on the picker's Card.
     ToggleLabel(Id),
     /// A picker pencil: open (or close) the Label's editor and start renaming it.
@@ -408,6 +415,7 @@ impl App {
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape if self.confirm.is_some() => self.confirm = None,
             Message::Escape if self.label_picker.is_some() => self.escape_labels(),
+            Message::Escape if self.move_picker.is_some() => self.move_picker = None,
             Message::Escape => {
                 // One layer per press: the text field, the Archive view, the Card panel, then
                 // the selection.
@@ -541,6 +549,12 @@ impl App {
             | Message::NewLabelChanged(_)
             | Message::NewLabelColor(_)
             | Message::CreateLabel => return self.update_labels(message),
+            Message::OpenMove => self.open_move(),
+            Message::CloseMove => self.move_picker = None,
+            Message::MoveToBoard(card, board) => {
+                self.move_to_board(card, board);
+                return self.reveal_selection();
+            }
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -846,6 +860,9 @@ impl App {
                         return self.update(Message::OpenBoard(board));
                     }
                     (Item::Column(_), _) if !drag.started => {}
+                    (Item::Card(card), Some(Target::Board(board))) => {
+                        return self.update(Message::MoveToBoard(card, board));
+                    }
                     (Item::Card(card), Some(target)) => self.drop_card(card, target),
                     (Item::Column(column), Some(Target::ColumnGap(gap))) => {
                         self.data.move_column(column, gap);
@@ -1029,6 +1046,7 @@ impl App {
         self.validate_selection();
         self.validate_archive();
         self.validate_labels();
+        self.validate_move();
         let on_board = |card: Id| {
             self.board().is_some_and(|b| {
                 b.columns
@@ -1194,6 +1212,10 @@ impl App {
         let content: Element<_> = mouse_area(content).on_press(Message::ClickOutside).into();
         let content: Element<_> = match &self.label_picker {
             Some(picker) => stack![content, self.view_label_picker(picker)].into(),
+            None => content,
+        };
+        let content: Element<_> = match self.move_picker {
+            Some(card) => stack![content, self.view_move_picker(card)].into(),
             None => content,
         };
         let content: Element<_> = match &self.not_saved {

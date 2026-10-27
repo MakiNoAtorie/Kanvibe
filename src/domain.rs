@@ -322,6 +322,57 @@ impl Data {
         to.insert(index.min(to.len()), moving);
     }
 
+    /// Moves an active Card to the bottom of another active Board's first Column (a "To do"
+    /// Column is created if it has none). Labels are matched by name (trimmed, case-insensitive):
+    /// the target's Label is used (its colour wins), else the source's is appended to the target.
+    /// Own or archived Board, unknown Card or Board: nothing.
+    pub fn move_to_board(&mut self, card: Id, board: Id) -> Option<()> {
+        let (b, c) = self.column_where(|c| c.cards.iter().any(|x| x.id == card))?;
+        let t = self
+            .boards
+            .iter()
+            .position(|x| x.id == board && !x.archived)?;
+        if t == b {
+            return None;
+        }
+        let from = &mut self.boards[b].columns[c].cards;
+        let at = from.iter().position(|x| x.id == card)?;
+        let mut card = from.remove(at);
+        let source = card
+            .labels
+            .iter()
+            .filter_map(|id| self.boards[b].labels.iter().find(|l| l.id == *id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let key = |name: &str| name.trim().to_lowercase();
+        card.labels.clear();
+        for label in source {
+            let found = self.boards[t]
+                .labels
+                .iter()
+                .find(|l| key(&l.name) == key(&label.name))
+                .map(|l| l.id);
+            let id = found.unwrap_or_else(|| {
+                let id = self.new_id();
+                self.boards[t].labels.push(Label { id, ..label });
+                id
+            });
+            card.labels.push(id);
+        }
+        if self.boards[t].columns.is_empty() {
+            let id = self.new_id();
+            self.boards[t].columns.push(Column {
+                id,
+                name: "To do".into(),
+                limit: None,
+                cards: Vec::new(),
+            });
+        }
+        card.updated = now(); // its Column changed
+        self.boards[t].columns[0].cards.push(card);
+        Some(())
+    }
+
     /// Sends an active Card to its Board's Archive, remembering its Column.
     pub fn archive_card(&mut self, card: Id) -> Option<()> {
         let (b, c) = self.column_where(|c| c.cards.iter().any(|x| x.id == card))?;

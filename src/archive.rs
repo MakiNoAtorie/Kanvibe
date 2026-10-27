@@ -42,6 +42,27 @@ pub fn delete_question(board: &Board, card: Id) -> Option<String> {
 }
 
 impl App {
+    /// Where the selection goes when the selected `card` leaves its Column (archived, moved to
+    /// another Board): the Card below, else above, else the Column. `None` if it isn't selected.
+    pub(crate) fn selection_after_leaving(&self, card: Id) -> Option<Selection> {
+        let s = self.selection.filter(|s| s.card == Some(card))?;
+        let cards = &self
+            .data
+            .boards
+            .iter()
+            .flat_map(|b| &b.columns)
+            .find(|c| c.id == s.column)?
+            .cards;
+        let i = cards.iter().position(|c| c.id == card)?;
+        let near = cards
+            .get(i + 1)
+            .or(i.checked_sub(1).and_then(|j| cards.get(j)));
+        Some(Selection {
+            column: s.column,
+            card: near.map(|c| c.id),
+        })
+    }
+
     /// Archives an active Card as one undo step. If it is the selected Card the selection moves
     /// to the Card below, else above, else the Column; its panel closes.
     pub(crate) fn archive_card(&mut self, card: Id) {
@@ -49,26 +70,7 @@ impl App {
         let Some(board) = self.board_of_card(card) else {
             return;
         };
-        let follow = self
-            .selection
-            .filter(|s| s.card == Some(card))
-            .and_then(|s| {
-                let cards = &self
-                    .data
-                    .boards
-                    .iter()
-                    .flat_map(|b| &b.columns)
-                    .find(|c| c.id == s.column)?
-                    .cards;
-                let i = cards.iter().position(|c| c.id == card)?;
-                let near = cards
-                    .get(i + 1)
-                    .or(i.checked_sub(1).and_then(|j| cards.get(j)));
-                Some(Selection {
-                    column: s.column,
-                    card: near.map(|c| c.id),
-                })
-            });
+        let follow = self.selection_after_leaving(card);
         if self.data.archive_card(card).is_some() {
             self.selection = follow.or(self.selection);
             self.history
