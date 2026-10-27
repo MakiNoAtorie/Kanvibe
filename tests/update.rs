@@ -709,3 +709,24 @@ fn the_capture_box_is_a_pending_edit_too() {
     assert_eq!(app.capture, None);
     assert!(app.editing.is_none());
 }
+
+#[test]
+fn creating_a_board_while_a_capture_box_is_open_adds_its_card_first() {
+    let mut app = app_with_board();
+    let todo = column_id(&app, 0);
+    // The name prompt is open, then a Capture box is opened and typed into.
+    send(&mut app, [Message::NewBoard]);
+    send(
+        &mut app,
+        [
+            Message::OpenCapture(todo),
+            Message::CaptureChanged("Half typed".into()),
+            Message::BoardNameChanged("Home".into()),
+            Message::CreateBoard,
+        ],
+    );
+
+    assert_eq!(app.data.boards.len(), 2);
+    assert_eq!(card_titles(&app, 0), ["Half typed"]);
+    assert_eq!(app.capture, None);
+}

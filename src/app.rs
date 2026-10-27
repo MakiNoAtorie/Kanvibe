@@ -417,6 +417,7 @@ impl App {
                 }
             }
             Message::CreateBoard => {
+                self.commit_pending(); // a Capture box opened under the prompt keeps its Card
                 let name = self.board_name.as_deref().unwrap_or_default();
                 if let Some(id) = self.data.create_board(name) {
                     self.current_board = Some(id);
