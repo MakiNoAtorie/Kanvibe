@@ -278,9 +278,11 @@ impl App {
                 let new = self.label_picker.as_ref().and_then(|p| p.new.clone());
                 let board = card.and_then(|card| self.data.board_of_card(card));
                 if let Some((new, board)) = new.zip(board)
-                    && self.data.add_label(board, &new.text, &new.color).is_some()
+                    && let Some(label) = self.data.add_label(board, &new.text, &new.color)
                 {
                     self.label_picker.as_mut().expect("open").new = None;
+                    // Created from this Card's picker: it goes on the Card, same step.
+                    card.map(|card| self.data.toggle_label(card, label));
                     self.record_step(Some(board));
                 }
             }
