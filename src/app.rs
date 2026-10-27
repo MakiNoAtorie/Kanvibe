@@ -678,11 +678,11 @@ impl App {
                 let focused = focused.and_then(input);
                 let dragging = self.drag.is_some();
                 let message = keys::map(&event, &Context { focused, dragging });
-                // A dialog leaves only Esc; the Archive view also Undo/Redo.
+                // A dialog leaves only Esc; the Archive view also Undo/Redo and F1.
                 let allowed = |m: &Message| match m {
                     Message::Escape => true,
                     _ if self.dialog_open() => false,
-                    Message::Undo | Message::Redo => true,
+                    Message::Undo | Message::Redo | Message::ShowShortcuts => true,
                     _ => self.archive.is_none(),
                 };
                 if let Some(message) = message.filter(allowed) {
