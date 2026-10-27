@@ -84,4 +84,27 @@ impl Data {
         });
         Some(id)
     }
+
+    /// Moves a Card to `index` in a Column (clamped to its end). Unknown Card or Column: nothing.
+    pub fn move_card(&mut self, card: Id, column: Id, index: usize) {
+        let (Some((fb, fc)), Some((tb, tc))) = (
+            self.column_where(|c| c.cards.iter().any(|x| x.id == card)),
+            self.column_where(|c| c.id == column),
+        ) else {
+            return;
+        };
+        let from = &mut self.boards[fb].columns[fc].cards;
+        let at = from.iter().position(|x| x.id == card).expect("found above");
+        let moving = from.remove(at);
+        let to = &mut self.boards[tb].columns[tc].cards;
+        to.insert(index.min(to.len()), moving);
+    }
+
+    /// (Board index, Column index) of the first Column matching `f`.
+    fn column_where(&self, f: impl Fn(&Column) -> bool) -> Option<(usize, usize)> {
+        self.boards
+            .iter()
+            .enumerate()
+            .find_map(|(b, board)| Some((b, board.columns.iter().position(&f)?)))
+    }
 }

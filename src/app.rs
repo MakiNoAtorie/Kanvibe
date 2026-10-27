@@ -1,11 +1,13 @@
 //! The iced program: state, Message, `update` (the only place state changes) and `view`.
 use iced::widget::{
-    button, center, column, container, operation, row, scrollable, text, text_input,
+    self, button, center, column, container, mouse_area, operation, row, scrollable, selector,
+    text, text_input,
 };
-use iced::{Element, Event, Fill, Subscription, Task, event, keyboard};
+use iced::{Element, Event, Fill, Subscription, Task, Theme, event, keyboard};
 
 use crate::domain::{Board, Column, Data, Id};
 use crate::history::History;
+use crate::keys::{self, Context, Field};
 use crate::storage::{self, Settings};
 use std::path::PathBuf;
 use std::{fs, io};
@@ -27,6 +29,14 @@ pub struct App {
     pub data_dir: Option<PathBuf>,
     /// What the data file last saved holds, so only changes are saved.
     pub saved: (Data, Settings),
+    /// The selected Column and, optionally, a Card in it; both outlined.
+    pub selection: Option<Selection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Selection {
+    pub column: Id,
+    pub card: Option<Id>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,8 +45,26 @@ pub struct Capture {
     pub text: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Message {
+    /// A click on a Card, or on a Column's empty area (`card: None`).
+    Select(Selection),
+    /// An arrow key: select the neighbouring Card or Column.
+    MoveSelection(Direction),
+    /// Ctrl+arrow: move the selected Card to the neighbouring Column, or up/down within its own.
+    MoveCard(Direction),
+    /// N: open the Capture box in the selected Column, else the first.
+    NewCard,
+    Undo,
+    Redo,
     NewBoard,
     BoardNameChanged(String),
     CreateBoard,
@@ -44,8 +72,10 @@ pub enum Message {
     CaptureChanged(String),
     SubmitCapture,
     Escape,
-    /// A key press not handled elsewhere; Ctrl+Z undoes, Ctrl+Y / Ctrl+Shift+Z redo.
+    /// A key press no widget captured; `update` asks which field has focus, then maps it.
     Key(keyboard::Event),
+    /// A key press plus the focused widget, if any; mapped by [`keys::map`].
+    KeyWithFocus(keyboard::Event, Option<selector::Target>),
 }
 
 impl App {
@@ -65,6 +95,7 @@ impl App {
                 let name = self.board_name.as_deref().unwrap_or_default();
                 if let Some(id) = self.data.create_board(name) {
                     self.current_board = Some(id);
+                    self.validate_selection();
                     self.board_name = None;
                     self.history.record(&self.data.boards, None, None);
                 }
@@ -83,31 +114,136 @@ impl App {
             }
             Message::SubmitCapture => {
                 if let Some(capture) = &mut self.capture {
-                    self.data.add_card(capture.column, &capture.text);
+                    let card = self.data.add_card(capture.column, &capture.text);
                     capture.text.clear();
                     let column = capture.column;
+                    if card.is_some() {
+                        self.selection = Some(Selection { column, card });
+                    }
                     let board = self.board_of_column(column);
                     self.history.record(&self.data.boards, board, board);
+                    if card.is_some() {
+                        return self.reveal_selection();
+                    }
                 }
             }
             Message::Escape => {
-                self.board_name = None;
-                self.capture = None;
+                if self.board_name.is_some() || self.capture.is_some() {
+                    self.board_name = None;
+                    self.capture = None;
+                } else {
+                    self.selection = None;
+                }
             }
-            Message::Key(event) => {
-                if let Some((boards, show)) = match undo_shortcut(&event) {
-                    Some(false) => self.history.undo(),
-                    Some(true) => self.history.redo(),
-                    None => None,
-                } {
+            Message::NewCard => {
+                let column = self
+                    .selection
+                    .map(|s| s.column)
+                    .or_else(|| Some(self.board()?.columns.first()?.id));
+                if let Some(column) = column {
+                    let reveal = reveal(BOARD_SCROLL.into(), column_widget(column), true);
+                    return Task::batch([self.update(Message::OpenCapture(column)), reveal]);
+                }
+            }
+            Message::Select(selection) => {
+                self.selection = Some(selection);
+                return self.reveal_selection();
+            }
+            Message::MoveSelection(direction) => {
+                if let Some(board) = self.board() {
+                    self.selection = moved(board, self.selection, direction).or(self.selection);
+                }
+                return self.reveal_selection();
+            }
+            Message::MoveCard(direction) => {
+                let target = self.board().zip(self.selection);
+                if let Some((card, column, index)) =
+                    target.and_then(|(board, selection)| card_move(board, selection, direction))
+                {
+                    self.data.move_card(card, column, index);
+                    self.selection = Some(Selection {
+                        column,
+                        card: Some(card),
+                    });
+                    let board = self.current_board;
+                    self.history.record(&self.data.boards, board, board);
+                    return self.reveal_selection();
+                }
+            }
+            Message::Undo | Message::Redo => {
+                let step = match message {
+                    Message::Undo => self.history.undo(),
+                    _ => self.history.redo(),
+                };
+                if let Some((boards, show)) = step {
                     self.data.boards = boards;
                     if show.is_some() {
                         self.current_board = show;
                     }
+                    self.validate_selection();
+                }
+            }
+            Message::Key(event) => {
+                return selector::find(selector::is_focused())
+                    .map(move |focused| Message::KeyWithFocus(event.clone(), focused));
+            }
+            Message::KeyWithFocus(event, focused) => {
+                let id = |name| Some(widget::Id::new(name));
+                let focused = focused.and_then(|target| match target {
+                    selector::Target::Focusable { id: f, .. } if f == id(BOARD_NAME_INPUT) => {
+                        Some(Field::BoardName)
+                    }
+                    selector::Target::Focusable { id: f, .. } if f == id(CAPTURE_INPUT) => {
+                        Some(Field::Capture)
+                    }
+                    _ => None,
+                });
+                if let Some(message) = keys::map(&event, &Context { focused }) {
+                    return self.update(message);
                 }
             }
         }
         Task::none()
+    }
+
+    /// Keeps the selection on the current Board: it follows its Card to another Column and is
+    /// cleared when its Card or Column is gone.
+    // ponytail: called where Boards can change under the selection (undo/redo, Board switch);
+    // the spec's "after every update" check can replace these calls.
+    fn validate_selection(&mut self) {
+        let Some(board) = self.board() else {
+            self.selection = None;
+            return;
+        };
+        self.selection = self.selection.and_then(|s| match s.card {
+            Some(card) => board
+                .columns
+                .iter()
+                .find(|c| c.cards.iter().any(|x| x.id == card))
+                .map(|c| Selection {
+                    column: c.id,
+                    card: Some(card),
+                }),
+            None => board.columns.iter().any(|c| c.id == s.column).then_some(s),
+        });
+    }
+
+    /// Scrolls the selected Column fully into view, and its Card into view within it.
+    fn reveal_selection(&self) -> Task<Message> {
+        let Some(s) = self.selection else {
+            return Task::none();
+        };
+        let column = reveal(BOARD_SCROLL.into(), column_widget(s.column), true);
+        let card = s.card.map_or(Task::none(), |card| {
+            reveal(cards_widget(s.column), card_widget(card), false)
+        });
+        Task::batch([column, card])
+    }
+
+    /// The current Board.
+    fn board(&self) -> Option<&Board> {
+        let id = self.current_board?;
+        self.data.boards.iter().find(|b| b.id == id)
     }
 
     fn board_of_column(&self, column: Id) -> Option<Id> {
@@ -120,14 +256,20 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        // ponytail: Esc only, ignoring capture status (a focused text_input swallows Esc);
-        // the key-mapping module replaces this.
-        event::listen_with(|event, _status, _window| match event {
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                ..
-            }) => Some(Message::Escape),
-            Event::Keyboard(key) if undo_shortcut(&key).is_some() => Some(Message::Key(key)),
+        event::listen_with(|event, status, _window| match (event, status) {
+            (Event::Keyboard(key @ keyboard::Event::KeyPressed { .. }), event::Status::Ignored) => {
+                Some(Message::Key(key))
+            }
+            // A focused text_input captures Esc and only unfocuses; this is the "leave the
+            // text field" layer of Esc, so the capture box / name prompt close on one press.
+            // ponytail: any captured Esc closes them; a field that must survive Esc needs its own check.
+            (
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                }),
+                event::Status::Captured,
+            ) => Some(Message::Escape),
             _ => None,
         })
     }
@@ -149,6 +291,7 @@ impl App {
         column![
             text(&board.name).size(20),
             scrollable(row(columns).spacing(12).height(Fill))
+                .id(BOARD_SCROLL)
                 .horizontal()
                 .height(Fill),
         ]
@@ -158,12 +301,21 @@ impl App {
     }
 
     fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
+        let selection = self.selection.filter(|s| s.column == col.id);
         let cards = col.cards.iter().map(|card| {
-            container(text(&card.title))
+            let select = Message::Select(Selection {
+                column: col.id,
+                card: Some(card.id),
+            });
+            let card_box = container(text(&card.title))
+                .id(card_widget(card.id))
                 .width(Fill)
                 .padding(8)
-                .style(container::bordered_box)
-                .into()
+                .style(outlined(
+                    container::bordered_box,
+                    selection.is_some_and(|s| s.card == Some(card.id)),
+                ));
+            mouse_area(card_box).on_press(select).into()
         });
         let footer: Element<_> = match &self.capture {
             Some(capture) if capture.column == col.id => text_input("Card title", &capture.text)
@@ -176,19 +328,28 @@ impl App {
                 .on_press(Message::OpenCapture(col.id))
                 .into(),
         };
-        container(
+        let column_box = container(
             column![
                 text(&col.name),
-                scrollable(column(cards).spacing(6)).height(Fill),
+                scrollable(column(cards).spacing(6))
+                    .id(cards_widget(col.id))
+                    .height(Fill),
                 footer
             ]
             .spacing(8),
         )
+        .id(column_widget(col.id))
         .width(280)
         .height(Fill)
         .padding(8)
-        .style(container::rounded_box)
-        .into()
+        .style(outlined(container::rounded_box, selection.is_some()));
+        // Cards and buttons capture their clicks, so this only fires on the Column's empty area.
+        mouse_area(column_box)
+            .on_press(Message::Select(Selection {
+                column: col.id,
+                card: None,
+            }))
+            .into()
     }
 
     fn view_empty(&self) -> Element<'_, Message> {
@@ -211,26 +372,140 @@ impl App {
     }
 }
 
-/// `Some(false)` for Ctrl+Z (undo), `Some(true)` for Ctrl+Y or Ctrl+Shift+Z (redo).
-// ponytail: the key-mapping function (#7) takes this over.
-fn undo_shortcut(event: &keyboard::Event) -> Option<bool> {
-    let keyboard::Event::KeyPressed {
-        key,
-        physical_key,
-        modifiers,
-        ..
-    } = event
-    else {
-        return None;
+/// The scroll offset that brings `start..start + len` into a `viewport`-long view currently
+/// scrolled to `offset`, moving as little as possible; `None` when it is already fully visible.
+/// Something longer than the viewport shows its start.
+pub fn scroll_to_show(start: f32, len: f32, offset: f32, viewport: f32) -> Option<f32> {
+    if start < offset {
+        Some(start)
+    } else if start + len > offset + viewport {
+        Some((start + len - viewport).min(start))
+    } else {
+        None
+    }
+}
+
+/// Scrolls `scrollable` so its descendant `child` is fully visible along one axis.
+fn reveal(scrollable: widget::Id, child: widget::Id, horizontal: bool) -> Task<Message> {
+    selector::find(scrollable.clone()).and_then(move |area| {
+        let scrollable = scrollable.clone();
+        selector::find(child.clone()).and_then(move |child| {
+            let selector::Target::Scrollable {
+                bounds,
+                translation,
+                ..
+            } = &area
+            else {
+                return Task::none();
+            };
+            // Layout bounds are unscrolled, so the child's offset from the scrollable is its
+            // position in the content.
+            let c = child.bounds();
+            let to = if horizontal {
+                scroll_to_show(c.x - bounds.x, c.width, translation.x, bounds.width).map(|x| {
+                    operation::AbsoluteOffset {
+                        x: Some(x),
+                        y: None,
+                    }
+                })
+            } else {
+                scroll_to_show(c.y - bounds.y, c.height, translation.y, bounds.height).map(|y| {
+                    operation::AbsoluteOffset {
+                        x: None,
+                        y: Some(y),
+                    }
+                })
+            };
+            to.map_or(Task::none(), |to| {
+                operation::scroll_to(scrollable.clone(), to)
+            })
+        })
+    })
+}
+
+/// `base`, with a 2px primary-colour border when `selected`.
+fn outlined(
+    base: fn(&Theme) -> container::Style,
+    selected: bool,
+) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let style = base(theme);
+        if !selected {
+            return style;
+        }
+        container::Style {
+            border: style.border.color(theme.palette().primary).width(2),
+            ..style
+        }
+    }
+}
+
+const BOARD_SCROLL: &str = "board";
+
+fn column_widget(column: Id) -> widget::Id {
+    widget::Id::from(format!("column-{column}"))
+}
+
+fn cards_widget(column: Id) -> widget::Id {
+    widget::Id::from(format!("cards-{column}"))
+}
+
+fn card_widget(card: Id) -> widget::Id {
+    widget::Id::from(format!("card-{card}"))
+}
+
+/// Where an arrow key takes the selection on `board`; `None` = stay put.
+fn moved(board: &Board, selection: Option<Selection>, direction: Direction) -> Option<Selection> {
+    let at = |column: &Column, index: Option<usize>| Selection {
+        column: column.id,
+        card: index.and_then(|i| column.cards.get(i)).map(|card| card.id),
     };
-    if !modifiers.command() {
-        return None;
+    let Some(selection) = selection else {
+        return board.columns.first().map(|c| at(c, Some(0)));
+    };
+    let (ci, index) = position(board, selection)?;
+    let column = &board.columns[ci];
+    match direction {
+        Direction::Up => Some(at(column, Some(index?.checked_sub(1)?))),
+        Direction::Down => {
+            let next = index.map_or(0, |i| i + 1);
+            (next < column.cards.len()).then(|| at(column, Some(next)))
+        }
+        Direction::Left | Direction::Right => {
+            let next = match direction {
+                Direction::Left => board.columns.get(ci.checked_sub(1)?)?,
+                _ => board.columns.get(ci + 1)?,
+            };
+            let i = index.unwrap_or(0).min(next.cards.len().saturating_sub(1));
+            Some(at(next, Some(i)))
+        }
     }
-    match key.to_latin(*physical_key)? {
-        'z' => Some(modifiers.shift()),
-        'y' => Some(true),
-        _ => None,
+}
+
+/// Where Ctrl+arrow moves the selected Card: (Card, Column, index). `None` = no Card or at an end.
+fn card_move(board: &Board, selection: Selection, direction: Direction) -> Option<(Id, Id, usize)> {
+    let (ci, index) = position(board, selection)?;
+    let (card, i) = (selection.card?, index?);
+    let column = &board.columns[ci];
+    match direction {
+        Direction::Up => Some((card, column.id, i.checked_sub(1)?)),
+        Direction::Down => (i + 1 < column.cards.len()).then_some((card, column.id, i + 1)),
+        Direction::Left => Some((card, board.columns.get(ci.checked_sub(1)?)?.id, usize::MAX)),
+        Direction::Right => Some((card, board.columns.get(ci + 1)?.id, usize::MAX)),
     }
+}
+
+/// The selection's Column index on `board` and its Card's index in that Column.
+fn position(board: &Board, selection: Selection) -> Option<(usize, Option<usize>)> {
+    let ci = board
+        .columns
+        .iter()
+        .position(|c| c.id == selection.column)?;
+    let cards = &board.columns[ci].cards;
+    let index = selection
+        .card
+        .and_then(|id| cards.iter().position(|c| c.id == id));
+    Some((ci, index))
 }
 
 impl App {

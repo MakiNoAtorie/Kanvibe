@@ -176,15 +176,19 @@ fn ctrl(letter: &str, shift: bool) -> Message {
     if shift {
         modifiers |= keyboard::Modifiers::SHIFT;
     }
-    Message::Key(keyboard::Event::KeyPressed {
-        key: keyboard::Key::Character(letter.into()),
-        modified_key: keyboard::Key::Character(letter.into()),
-        physical_key: Physical::Code(code),
-        location: keyboard::Location::Standard,
-        modifiers,
-        text: None,
-        repeat: false,
-    })
+    // As delivered after the app's focus query found no focused field.
+    Message::KeyWithFocus(
+        keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(letter.into()),
+            modified_key: keyboard::Key::Character(letter.into()),
+            physical_key: Physical::Code(code),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        },
+        None,
+    )
 }
 
 #[test]
@@ -299,4 +303,251 @@ fn undo_never_rewinds_the_id_counter() {
     capture(&mut app, to_do, &["Two"]);
 
     assert!(app.data.boards[0].columns[0].cards[0].id > first);
+}
+
+// --- Selection and keyboard navigation (#7) ---
+
+use kanvibe::app::Selection;
+use keyboard::key::Named;
+
+/// A named key press, mapped by `keys::map` (no field focused) and sent through `update`.
+fn key(named: Named, ctrl: bool) -> Message {
+    let modifiers = if ctrl {
+        keyboard::Modifiers::CTRL
+    } else {
+        keyboard::Modifiers::empty()
+    };
+    let event = keyboard::Event::KeyPressed {
+        key: keyboard::Key::Named(named),
+        modified_key: keyboard::Key::Named(named),
+        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::F24),
+        location: keyboard::Location::Standard,
+        modifiers,
+        text: None,
+        repeat: false,
+    };
+    kanvibe::keys::map(&event, &Default::default()).expect("a mapped key")
+}
+
+fn card_id(app: &App, column: usize, index: usize) -> Id {
+    app.data.boards[0].columns[column].cards[index].id
+}
+
+fn selected(app: &App, column: usize, card: Option<usize>) -> Option<Selection> {
+    Some(Selection {
+        column: column_id(app, column),
+        card: card.map(|index| card_id(app, column, index)),
+    })
+}
+
+/// "Work" with To do: A, B, C; Doing: empty; Done: D. Capture box closed, nothing selected.
+fn app_with_cards() -> App {
+    let mut app = app_with_board();
+    let (to_do, done) = (column_id(&app, 0), column_id(&app, 2));
+    capture(&mut app, to_do, &["A", "B", "C"]);
+    capture(&mut app, done, &["D"]);
+    send(&mut app, [Message::Escape]);
+    app.selection = None;
+    app
+}
+
+#[test]
+fn with_nothing_selected_an_arrow_selects_the_first_card_of_the_first_column() {
+    let mut app = app_with_cards();
+
+    send(&mut app, [key(Named::ArrowRight, false)]);
+
+    assert_eq!(app.selection, selected(&app, 0, Some(0)));
+}
+
+#[test]
+fn with_nothing_selected_and_an_empty_first_column_an_arrow_selects_that_column() {
+    let mut app = app_with_board();
+
+    send(&mut app, [key(Named::ArrowDown, false)]);
+
+    assert_eq!(app.selection, selected(&app, 0, None));
+}
+
+#[test]
+fn up_and_down_move_within_the_column_and_stop_at_the_ends() {
+    let mut app = app_with_cards();
+    app.selection = selected(&app, 0, Some(0));
+
+    send(&mut app, [key(Named::ArrowUp, false)]);
+    assert_eq!(app.selection, selected(&app, 0, Some(0)));
+
+    send(&mut app, (0..5).map(|_| key(Named::ArrowDown, false)));
+    assert_eq!(app.selection, selected(&app, 0, Some(2)));
+
+    send(&mut app, [key(Named::ArrowUp, false)]);
+    assert_eq!(app.selection, selected(&app, 0, Some(1)));
+}
+
+#[test]
+fn left_and_right_keep_the_position_clamped_and_never_skip_empty_columns() {
+    let mut app = app_with_cards();
+    app.selection = selected(&app, 0, Some(2)); // C
+
+    send(&mut app, [key(Named::ArrowRight, false)]);
+    assert_eq!(app.selection, selected(&app, 1, None)); // empty Doing
+
+    send(&mut app, [key(Named::ArrowRight, false)]);
+    assert_eq!(app.selection, selected(&app, 2, Some(0))); // D, clamped
+
+    send(&mut app, [key(Named::ArrowRight, false)]);
+    assert_eq!(app.selection, selected(&app, 2, Some(0))); // outermost: stays
+
+    app.selection = selected(&app, 0, Some(2));
+    send(&mut app, [key(Named::ArrowLeft, false)]);
+    assert_eq!(app.selection, selected(&app, 0, Some(2)));
+}
+
+#[test]
+fn clicking_a_columns_empty_area_selects_the_column() {
+    let mut app = app_with_cards();
+    let doing = column_id(&app, 1);
+
+    send(
+        &mut app,
+        [Message::Select(Selection {
+            column: doing,
+            card: None,
+        })],
+    );
+
+    assert_eq!(app.selection, selected(&app, 1, None));
+}
+
+#[test]
+fn ctrl_left_and_right_move_the_card_to_the_bottom_of_the_neighbour_column() {
+    let mut app = app_with_cards();
+    let b = card_id(&app, 0, 1);
+    app.selection = selected(&app, 0, Some(1)); // B
+
+    send(
+        &mut app,
+        [key(Named::ArrowRight, true), key(Named::ArrowRight, true)],
+    );
+    assert_eq!(card_titles(&app, 0), ["A", "C"]);
+    assert_eq!(card_titles(&app, 2), ["D", "B"]);
+    let in_done = Some(Selection {
+        column: column_id(&app, 2),
+        card: Some(b),
+    });
+    assert_eq!(app.selection, in_done);
+
+    send(&mut app, [key(Named::ArrowRight, true)]); // outermost: no-op, no step
+    assert_eq!(card_titles(&app, 2), ["D", "B"]);
+
+    send(&mut app, [ctrl("z", false)]); // one step per move; selection follows the Card
+    assert_eq!(card_titles(&app, 1), ["B"]);
+    assert_eq!(app.selection.map(|s| s.column), Some(column_id(&app, 1)));
+    send(&mut app, [key(Named::ArrowLeft, true)]);
+    assert_eq!(card_titles(&app, 0), ["A", "C", "B"]);
+}
+
+#[test]
+fn ctrl_up_and_down_reorder_the_card_within_its_column() {
+    let mut app = app_with_cards();
+    app.selection = selected(&app, 0, Some(0)); // A
+
+    send(&mut app, [key(Named::ArrowUp, true)]); // top: no-op
+    assert_eq!(card_titles(&app, 0), ["A", "B", "C"]);
+
+    send(&mut app, (0..3).map(|_| key(Named::ArrowDown, true)));
+    assert_eq!(card_titles(&app, 0), ["B", "C", "A"]);
+    assert_eq!(app.selection, selected(&app, 0, Some(2)));
+
+    send(&mut app, [key(Named::ArrowUp, true)]);
+    assert_eq!(card_titles(&app, 0), ["B", "A", "C"]);
+
+    send(&mut app, [ctrl("z", false)]);
+    assert_eq!(card_titles(&app, 0), ["B", "C", "A"]);
+}
+
+#[test]
+fn ctrl_arrows_do_nothing_without_a_selected_card() {
+    let mut app = app_with_cards();
+    app.selection = selected(&app, 0, None);
+
+    send(
+        &mut app,
+        [key(Named::ArrowRight, true), key(Named::ArrowDown, true)],
+    );
+
+    assert_eq!(card_titles(&app, 0), ["A", "B", "C"]);
+    assert_eq!(app.selection, selected(&app, 0, None));
+}
+
+#[test]
+fn n_opens_the_capture_box_in_the_selected_column_else_the_first() {
+    let mut app = app_with_cards();
+
+    send(&mut app, [Message::NewCard]);
+    assert_eq!(
+        app.capture.as_ref().map(|c| c.column),
+        Some(column_id(&app, 0))
+    );
+
+    send(&mut app, [Message::Escape]);
+    app.selection = selected(&app, 2, Some(0));
+    send(&mut app, [Message::NewCard]);
+    assert_eq!(
+        app.capture.as_ref().map(|c| c.column),
+        Some(column_id(&app, 2))
+    );
+}
+
+#[test]
+fn a_new_card_becomes_the_selected_card_and_undo_clears_that_selection() {
+    let mut app = app_with_cards();
+    let doing = column_id(&app, 1);
+
+    capture(&mut app, doing, &["E", "F"]);
+    assert_eq!(app.selection, selected(&app, 1, Some(1)));
+
+    send(&mut app, [ctrl("z", false)]);
+    assert_eq!(app.selection, None);
+}
+
+#[test]
+fn esc_leaves_the_text_field_first_then_clears_the_selection() {
+    let mut app = app_with_cards();
+    app.selection = selected(&app, 0, Some(1));
+    send(&mut app, [Message::NewCard]);
+
+    send(&mut app, [key(Named::Escape, false)]);
+    assert_eq!(app.capture, None);
+    assert_eq!(app.selection, selected(&app, 0, Some(1)));
+
+    send(&mut app, [key(Named::Escape, false)]);
+    assert_eq!(app.selection, None);
+}
+
+#[test]
+fn scrolling_into_view_moves_only_as_far_as_needed() {
+    use kanvibe::app::scroll_to_show;
+    // A 280-wide Column in a 600-wide viewport scrolled to 100.
+    assert_eq!(scroll_to_show(200.0, 280.0, 100.0, 600.0), None); // fully visible
+    assert_eq!(scroll_to_show(50.0, 280.0, 100.0, 600.0), Some(50.0)); // cut on the left
+    assert_eq!(scroll_to_show(584.0, 280.0, 100.0, 600.0), Some(264.0)); // cut on the right
+    assert_eq!(scroll_to_show(584.0, 800.0, 100.0, 600.0), Some(584.0)); // too big: show its start
+}
+
+#[test]
+fn creating_another_board_clears_the_selection() {
+    let mut app = app_with_cards();
+    app.selection = selected(&app, 0, Some(0));
+
+    send(
+        &mut app,
+        [
+            Message::NewBoard,
+            Message::BoardNameChanged("Home".into()),
+            Message::CreateBoard,
+        ],
+    );
+
+    assert_eq!(app.selection, None);
 }
