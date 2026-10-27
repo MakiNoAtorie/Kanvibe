@@ -86,6 +86,9 @@ pub struct Card {
     /// IDs of Labels of the Card's own Board. Read them in Board order via `Data::card_labels`.
     #[serde(default)]
     pub labels: Vec<Id>,
+    /// Markdown (ADR 0003); empty when the Card has none.
+    #[serde(default)]
+    pub description: String,
 }
 
 /// A Checklist Item. Edits target it by `id`, never by position.
@@ -259,6 +262,7 @@ impl Data {
             updated: now,
             checklist: Vec::new(),
             labels: Vec::new(),
+            description: String::new(),
         });
         Some(id)
     }
@@ -375,6 +379,19 @@ impl Data {
         if let Some(card) = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card) {
             card.updated = now();
         }
+    }
+
+    /// The Card's Markdown description.
+    pub fn description(&self, card: Id) -> Option<&str> {
+        self.card(card).map(|c| c.description.as_str())
+    }
+
+    /// Replaces the Card's description as typed. Does not touch `updated`: the caller does on commit.
+    pub fn set_description(&mut self, card: Id, text: &str) -> Option<()> {
+        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
+        let card = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card)?;
+        card.description = text.into();
+        Some(())
     }
 
     /// The name of the Board, Column or Label, or the title of the Card, with this ID.

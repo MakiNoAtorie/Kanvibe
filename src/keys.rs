@@ -48,6 +48,7 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         (true, Some('z')) => return Some(Message::Undo),
         (true, Some('y')) => return Some(Message::Redo),
         (false, Some('n')) if !typing && !modifiers.alt() => return Some(Message::NewCard),
+        (false, Some('e')) if !typing && !modifiers.alt() => return Some(Message::EditDescription),
         _ => {}
     }
     if *key == Key::Named(Named::F1) {

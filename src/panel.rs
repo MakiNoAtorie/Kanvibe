@@ -39,6 +39,7 @@ impl App {
             column![
                 header,
                 self.editable_name(Field::CardTitle(card.id), &card.title, 20),
+                self.view_description(card),
                 self.labels_row(card),
                 button("Archive Card")
                     .style(button::secondary)

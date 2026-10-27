@@ -15,6 +15,11 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Ctrl+Arrow keys", "Move the selected Card"),
     ("Enter", "Open the Card panel"),
     ("F2", "Rename the open Card"),
+    ("E", "Edit the open Card's description"),
+    (
+        "Ctrl+B / Ctrl+I / Ctrl+K",
+        "Bold, italic, link in the description",
+    ),
     ("Del", "Archive the selected Card"),
     ("L", "Labels of the open Card"),
     (
