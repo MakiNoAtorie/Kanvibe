@@ -52,6 +52,19 @@ impl Column {
 pub struct Card {
     pub id: Id,
     pub title: String,
+    /// RFC 3339 UTC, second precision. Blank in files from before timestamps existed.
+    #[serde(default)]
+    pub created: String,
+    /// When the Card's own fields last changed (not when neighbouring Cards shift).
+    #[serde(default)]
+    pub updated: String,
+}
+
+/// The current time as an RFC 3339 UTC string with second precision.
+pub fn now() -> String {
+    jiff::Timestamp::from_second(jiff::Timestamp::now().as_second())
+        .expect("now is in range")
+        .to_string()
 }
 
 impl Data {
@@ -181,9 +194,12 @@ impl Data {
             .iter_mut()
             .flat_map(|b| &mut b.columns)
             .find(|c| c.id == column)?;
+        let now = now();
         column.cards.push(Card {
             id,
             title: title.into(),
+            created: now.clone(),
+            updated: now,
         });
         Some(id)
     }
@@ -196,9 +212,13 @@ impl Data {
         ) else {
             return;
         };
+        let new_column = (fb, fc) != (tb, tc);
         let from = &mut self.boards[fb].columns[fc].cards;
         let at = from.iter().position(|x| x.id == card).expect("found above");
-        let moving = from.remove(at);
+        let mut moving = from.remove(at);
+        if new_column {
+            moving.updated = now(); // its Column changed; reordering alone is not its own change
+        }
         let to = &mut self.boards[tb].columns[tc].cards;
         to.insert(index.min(to.len()), moving);
     }
@@ -211,20 +231,43 @@ impl Data {
             .find_map(|(b, board)| Some((b, board.columns.iter().position(&f)?)))
     }
 
-    /// The name of the Board or Column with this ID.
+    /// The Card with this ID.
+    pub fn card(&self, id: Id) -> Option<&Card> {
+        self.boards
+            .iter()
+            .flat_map(|b| &b.columns)
+            .flat_map(|c| &c.cards)
+            .find(|c| c.id == id)
+    }
+
+    /// Marks the Card as changed just now.
+    pub fn touch(&mut self, card: Id) {
+        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
+        if let Some(card) = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card) {
+            card.updated = now();
+        }
+    }
+
+    /// The name of the Board or Column, or the title of the Card, with this ID.
     pub fn name(&self, id: Id) -> Option<&str> {
         self.boards.iter().find_map(|b| {
             if b.id == id {
                 return Some(b.name.as_str());
             }
-            b.columns
-                .iter()
-                .find(|c| c.id == id)
-                .map(|c| c.name.as_str())
+            b.columns.iter().find_map(|c| {
+                if c.id == id {
+                    return Some(c.name.as_str());
+                }
+                c.cards
+                    .iter()
+                    .find(|x| x.id == id)
+                    .map(|x| x.title.as_str())
+            })
         })
     }
 
-    /// Renames the Board or Column with this ID to the trimmed name. A blank name changes nothing.
+    /// Renames the Board or Column, or retitles the Card, with this ID to the trimmed name.
+    /// A blank name changes nothing. Does not touch `updated`: the caller does on commit.
     pub fn rename(&mut self, id: Id, name: &str) -> Option<()> {
         let name = name.trim();
         if name.is_empty() {
@@ -234,10 +277,15 @@ impl Data {
             if b.id == id {
                 return Some(&mut b.name);
             }
-            b.columns
-                .iter_mut()
-                .find(|c| c.id == id)
-                .map(|c| &mut c.name)
+            b.columns.iter_mut().find_map(|c| {
+                if c.id == id {
+                    return Some(&mut c.name);
+                }
+                c.cards
+                    .iter_mut()
+                    .find(|x| x.id == id)
+                    .map(|x| &mut x.title)
+            })
         })?;
         *target = name.into();
         Some(())

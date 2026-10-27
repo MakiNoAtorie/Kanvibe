@@ -56,6 +56,21 @@
 - Overlays: `stack![content, opaque(center(panel).style(dim))]`, as in `view_close_dialog`.
 - Storage tests: `send` runs `while let Some(job) = app.save_if_changed() { app.update(job.run()) }`; `send_while_writing` holds a job; `block_saves(dir)` (a folder named `kanvibe.json.tmp`) forces a failure.
 
+## Backup rotation (#20)
+- `storage::rotate(dir, &mut rotation, data_changed)` runs in `save_if_changed` right before a `SaveJob` is created (UI thread, never while a write is in flight). `App.rotation: storage::Rotation::{Due, Done, Off}`; `data_changed` = `saved.0 != data` (settings-only changes don't count).
+- `Rotation::Off` disables rotation and the 24 h rule for the session; set it when a file didn't load cleanly (startup Restore/Start empty; #22 load repair sets it in `App::open`). A failed rotation stays `Due`.
+- `.bak1` is written with `write_all` + `sync_all`, not `fs::copy` (which keeps the source mtime on Windows).
+- Storage test helpers: `saved_sample(dir)`, `create_board(app, name)`, `backups(dir)`, `read(dir, name)`, `age(dir, name, hours)`. Compare file contents as strings, not bytes.
+
+## Card panel (#8, `src/panel.rs`)
+- `App::update` is a thin wrapper: private `apply` (the body) then `validate_ui()`. Extend `validate_ui` for any "after every update" rule (Board gone, filter Labels gone, ...); it also calls `validate_selection`.
+- `App.panel: Option<Id>` (the Card shown); it stays when the Selection becomes column-only. Esc order now: text field, panel, Selection. A Board switch closes the panel via `validate_ui`.
+- `Data::name`/`Data::rename` also take a Card id (title); `rename` never touches `updated`. `commit_pending` calls `Data::touch(card)` only when the committed text differs from `start`. `Data::move_card` bumps `updated` on a Column change only.
+- Domain: `Card.created`/`Card.updated` (`#[serde(default)]` RFC 3339 strings), `domain::now()`, `Data::card(id)`, `Data::touch(id)`.
+- Messages `OpenPanel` (Enter), `ClosePanel` (X), `EditTitle` (F2). `Field::CardTitle`. `panel.rs` has `local_time(&str, &TimeZone)`, `WIDTH`, `App::view_panel`; `editable_name` is `pub(crate)`.
+- `view` wraps the Board as `row![container(board).width(Fill), panel]` before the Not saved bar.
+- Tests setting timestamps directly reset `app.history = Default::default()`; use `OLD = "2020-01-01T00:00:00Z"`. `tests/panel.rs` helpers: `app_with_cards()`, `card(app, title)`, `updated(app, title)`, `click(app, title)`.
+
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.
