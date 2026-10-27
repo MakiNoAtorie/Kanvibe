@@ -216,6 +216,10 @@ pub enum Message {
     OpenCapture(Id),
     CaptureChanged(String),
     SubmitCapture,
+    /// A paste into the Capture box (its text after the paste); the clipboard is re-read.
+    CapturePasted(String),
+    /// The clipboard after a paste: two or more non-blank lines become one Card each.
+    CaptureLines(Option<String>),
     Escape,
     /// A key press no widget captured; `update` asks which field has focus, then maps it.
     Key(keyboard::Event),
@@ -448,6 +452,13 @@ impl App {
                     return self.reveal_selection();
                 }
             }
+            Message::CapturePasted(text) => {
+                if let Some(capture) = &mut self.capture {
+                    capture.text = text;
+                    return iced::clipboard::read().map(Message::CaptureLines);
+                }
+            }
+            Message::CaptureLines(text) => return self.capture_lines(text.unwrap_or_default()),
             Message::Escape if self.drag.is_some() => self.drag = None, // first Esc layer
             Message::Escape if self.shortcuts => self.shortcuts = false,
             Message::Escape if self.notice.is_some() => self.notice = None,
@@ -967,6 +978,33 @@ impl App {
         self.record_step(self.data.board_of_column(column));
     }
 
+    /// A multi-line paste into the Capture box: one Card per non-blank line, as one undo step,
+    /// the last one selected. The box's text (typed and pasted) is replaced by the Cards and the
+    /// box stays open, empty. A single line changes nothing: the box already holds it.
+    fn capture_lines(&mut self, text: String) -> Task<Message> {
+        let lines: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let Some(capture) = self.capture.as_mut().filter(|_| lines.len() > 1) else {
+            return Task::none();
+        };
+        capture.text.clear();
+        let column = capture.column;
+        for line in lines {
+            if let Some(card) = self.data.add_card(column, line) {
+                let card = Some(card);
+                self.selection = Some(Selection { column, card });
+                if self.filter.is_on() {
+                    self.filter_kept.extend(card);
+                }
+            }
+        }
+        self.record_step(self.data.board_of_column(column));
+        self.reveal_selection()
+    }
+
     /// Shows the selected Card in the panel (else keeps the open one) and returns it.
     pub(crate) fn open_panel(&mut self) -> Option<Id> {
         self.panel = self.selection.and_then(|s| s.card).or(self.panel);
@@ -1435,6 +1473,7 @@ impl App {
             Some(capture) if capture.column == col.id => text_input("Card title", &capture.text)
                 .id(CAPTURE_INPUT)
                 .on_input(Message::CaptureChanged)
+                .on_paste(Message::CapturePasted)
                 .on_submit(Message::SubmitCapture)
                 .into(),
             _ => crate::chrome::tip(
