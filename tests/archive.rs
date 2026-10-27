@@ -466,3 +466,12 @@ fn f1_still_opens_the_shortcuts_in_the_archive_view() {
     send(&mut app, [Message::KeyWithFocus(press(Named::F1), None)]);
     assert!(app.shortcuts, "the footer button works there too");
 }
+
+#[test]
+fn the_archive_view_is_titled_with_its_board_and_count() {
+    let mut app = app_with_cards();
+    let a = card(&app, "A");
+    send(&mut app, [Message::ArchiveCard(a), Message::OpenArchive]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("Archive of Work (1)").is_ok());
+}

@@ -150,10 +150,14 @@ impl App {
     }
 
     pub(crate) fn view_archive<'a>(&'a self, board: &'a Board) -> Element<'a, Message> {
+        let title = format!("Archive of {} ({})", board.name, board.archived_cards.len());
         let header = row![
-            text(&board.name).size(20),
+            text(title).size(20),
             space::horizontal(),
-            button("Back to Board").on_press(Message::CloseArchive),
+            crate::chrome::tip(
+                button("Back to Board").on_press(Message::CloseArchive),
+                "Back to Board (Esc)"
+            ),
         ]
         .align_y(Center);
         let rows = rows(board);
