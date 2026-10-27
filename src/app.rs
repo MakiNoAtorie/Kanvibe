@@ -705,6 +705,7 @@ impl App {
             Message::StartEdit(field) => {
                 self.commit_pending();
                 self.board_menu = false;
+                self.column_menu = None;
                 let id = field.id();
                 let start = match field {
                     Field::Description(card) => self.data.description(card),
@@ -1540,6 +1541,9 @@ impl App {
             ),
             _ if self.column_menu == Some(col.id) => Some(
                 column![
+                    button("Rename")
+                        .style(button::secondary)
+                        .on_press(Message::StartEdit(Field::ColumnName(col.id))),
                     button("Set limit…")
                         .style(button::secondary)
                         .on_press(Message::OpenLimit(col.id)),

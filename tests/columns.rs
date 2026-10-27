@@ -221,3 +221,21 @@ fn the_count_explains_the_column_limit() {
     }
     assert_eq!(tip(&app).as_deref(), Some("Over the Column Limit (2 of 1)"));
 }
+
+#[test]
+fn the_column_menu_offers_rename() {
+    use kanvibe::app::Field;
+    let mut app = app_with_board();
+    let to_do = column_id(&app, 0);
+    send(&mut app, [Message::ToggleColumnMenu(to_do)]);
+    let mut ui = iced_test::simulator(app.view());
+    ui.click("Rename").expect("a Rename item");
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert!(messages.contains(&Message::StartEdit(Field::ColumnName(to_do))));
+    send(&mut app, messages);
+    assert_eq!(app.column_menu, None);
+    assert_eq!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(Field::ColumnName(to_do))
+    );
+}
