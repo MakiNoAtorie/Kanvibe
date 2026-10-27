@@ -16,6 +16,7 @@ Rules:
 - Run the repo's local checks before pushing. Do not poll or wait on CI; the orchestrator checks CI once at merge.
 - If a dependency, network or permission setting blocks you, stop and report exactly which host or setting needs changing. Don't loop.
 - Make one commit with `Refs #<n>` and the attribution trailers. Merge the integration-branch tip into your branch, then push.
+- Build only in your worktree's own `target/` (never a shared or scratch `CARGO_TARGET_DIR`: cargo gives every worktree's crate the same output file). After pushing, delete that `target/` and any other build output you created; disk space is tight.
 - Don't edit shared notes or the conventions file.
 
 Report briefly:
