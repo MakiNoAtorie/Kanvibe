@@ -198,7 +198,10 @@ pub fn query_maximized() -> Task<Message> {
 }
 
 /// A tooltip above-or-below `content`; used to name a button's shortcut.
-pub fn tip<'a>(content: impl Into<Element<'a, Message>>, label: &'a str) -> Element<'a, Message> {
+pub fn tip<'a>(
+    content: impl Into<Element<'a, Message>>,
+    label: impl text::IntoFragment<'a>,
+) -> Element<'a, Message> {
     tooltip(
         content,
         iced::widget::container(text(label).size(12))

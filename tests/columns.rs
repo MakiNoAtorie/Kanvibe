@@ -207,3 +207,17 @@ fn a_refused_limit_says_why_until_the_text_changes() {
     send(&mut app, [Message::LimitChanged("3".into())]);
     assert!(!app.limit_input.as_ref().unwrap().refused);
 }
+
+#[test]
+fn the_count_explains_the_column_limit() {
+    let mut app = app_with_board();
+    let to_do = column_id(&app, 0);
+    let tip = |app: &App| app.data.boards[0].columns[0].limit_tip();
+    assert_eq!(tip(&app), None);
+    set_limit(&mut app, to_do, "1");
+    assert_eq!(tip(&app).as_deref(), Some("Column Limit 1"));
+    for title in ["A", "B"] {
+        app.data.add_card(to_do, title);
+    }
+    assert_eq!(tip(&app).as_deref(), Some("Over the Column Limit (2 of 1)"));
+}

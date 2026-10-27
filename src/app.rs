@@ -1503,6 +1503,10 @@ impl App {
         } else {
             count
         };
+        let count = match col.limit_tip() {
+            Some(tip) => crate::chrome::tip(count, tip),
+            None => count.into(),
+        };
         // Dragged by the header only; the name label forwards the press (it captures its own).
         let item = Item::Column(col.id);
         let header = row![
