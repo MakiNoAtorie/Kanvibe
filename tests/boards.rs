@@ -300,3 +300,31 @@ fn active_boards_cannot_be_deleted() {
 
     assert_eq!(names(&app), ["A", "B", "C"]);
 }
+
+#[test]
+fn undoing_the_archive_of_the_last_open_board_opens_it_again() {
+    let (mut app, [a, b, c]) = app_with_boards();
+    send(
+        &mut app,
+        [Message::ArchiveBoard(a), Message::ArchiveBoard(b)],
+    );
+    send(&mut app, [Message::ArchiveBoard(c)]);
+    assert_eq!(app.current_board, None, "No open Boards");
+
+    send(&mut app, [Message::Undo]);
+    assert_eq!(
+        app.current_board,
+        Some(c),
+        "an active Board is never left unopened"
+    );
+
+    send(
+        &mut app,
+        [Message::ArchiveBoard(c), Message::RestoreBoard(a)],
+    );
+    assert_eq!(
+        app.current_board,
+        Some(a),
+        "restoring with nothing open opens it"
+    );
+}
