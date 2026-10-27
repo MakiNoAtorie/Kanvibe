@@ -51,6 +51,9 @@ pub struct WindowState {
     pub maximized: bool,
     size: Option<Size>,
     pos: Option<Point>,
+    /// The last report was a minimised window (0x0 size or parked position): its maximised
+    /// answer is `false` even when it was maximised, so answers are ignored until it is back.
+    minimised: bool,
 }
 
 impl WindowState {
@@ -70,18 +73,23 @@ impl WindowState {
     }
 
     pub fn resized(&mut self, size: Size) {
-        if size.width >= 1.0 && size.height >= 1.0 {
+        self.minimised = size.width < 1.0 || size.height < 1.0;
+        if !self.minimised {
             self.size = Some(size);
         }
     }
 
     pub fn moved(&mut self, pos: Point) {
-        if pos.x > MINIMISED_AT || pos.y > MINIMISED_AT {
+        self.minimised = pos.x <= MINIMISED_AT && pos.y <= MINIMISED_AT;
+        if !self.minimised {
             self.pos = Some(pos);
         }
     }
 
     pub fn set_maximized(&mut self, maximized: bool) {
+        if self.minimised {
+            return;
+        }
         self.maximized = maximized;
         if let (false, Some(size), Some(pos)) = (maximized, self.size, self.pos) {
             self.geometry = Some(Geometry {
