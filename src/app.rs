@@ -1335,10 +1335,19 @@ impl App {
         };
         let content: Element<_> = match &self.not_saved {
             Some(error) => column![
-                container(text(error))
-                    .width(Fill)
-                    .padding(8)
-                    .style(container::danger),
+                container(
+                    row![
+                        text(error).width(Fill),
+                        button("Retry now")
+                            .style(button::secondary)
+                            .on_press_maybe(self.writing.is_none().then_some(Message::RetrySave)),
+                    ]
+                    .spacing(8)
+                    .align_y(Center)
+                )
+                .width(Fill)
+                .padding(8)
+                .style(container::danger),
                 content
             ]
             .into(),

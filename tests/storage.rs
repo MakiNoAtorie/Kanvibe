@@ -1001,3 +1001,16 @@ fn an_unreadable_bak1_is_replaced_without_pushing_the_good_bak2_out() {
         "the readable backup is kept"
     );
 }
+
+#[test]
+fn the_not_saved_bar_has_a_retry_button() {
+    let mut app = App {
+        not_saved: Some("Not saved: x: denied".into()),
+        ..Default::default()
+    };
+    let _ = app.update(Message::NewBoard);
+    let mut ui = iced_test::simulator(app.view());
+    ui.click("Retry now").expect("a Retry now button");
+    let retry = ui.into_messages().any(|m| m == Message::RetrySave);
+    assert!(retry);
+}
