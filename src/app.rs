@@ -1578,7 +1578,7 @@ impl App {
 
     fn view_empty(&self) -> Element<'_, Message> {
         let content: Element<_> = match &self.board_name {
-            Some(name) => column![text("Name your Board"), board_name_input(name).width(280)]
+            Some(name) => column![text("Name your Board"), board_name_input(name).width(320)]
                 .spacing(8)
                 .into(),
             None if self.data.boards.is_empty() => button("Create your first Board")
@@ -1651,12 +1651,18 @@ pub(crate) fn clipped_text<'a>(
     clipped(text(s.clone()).wrapping(text::Wrapping::None), text(s))
 }
 
-/// The new-Board name prompt's text box.
-pub(crate) fn board_name_input(name: &str) -> widget::TextInput<'_, Message> {
-    text_input("Board name", name)
-        .id(BOARD_NAME_INPUT)
-        .on_input(Message::BoardNameChanged)
-        .on_submit(Message::CreateBoard)
+/// The new-Board name prompt: its text box and Create (disabled while blank).
+pub(crate) fn board_name_input(name: &str) -> widget::Row<'_, Message> {
+    let create = (!name.trim().is_empty()).then_some(Message::CreateBoard);
+    row![
+        text_input("Board name", name)
+            .id(BOARD_NAME_INPUT)
+            .on_input(Message::BoardNameChanged)
+            .on_submit(Message::CreateBoard),
+        button("Create").on_press_maybe(create),
+    ]
+    .spacing(4)
+    .align_y(Center)
 }
 
 /// A dialog's title row with its ✕ (Esc) button sending `close`.

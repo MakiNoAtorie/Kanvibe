@@ -355,3 +355,24 @@ fn archiving_shows_the_archived_section_and_restoring_opens_the_board() {
     );
     let _ = b;
 }
+
+#[test]
+fn the_board_name_prompt_has_a_create_button() {
+    let mut app = App::default();
+    send(&mut app, [Message::NewBoard]);
+    assert!(iced_test::simulator(app.view()).find("Create").is_ok());
+    // The sidebar's prompt too.
+    create_board(&mut app, "A");
+    send(&mut app, [Message::NewBoard]);
+    let mut ui = iced_test::simulator(app.view());
+    let _ = ui.click("Create");
+    let created = ui.into_messages().any(|m| m == Message::CreateBoard);
+    assert!(!created, "disabled while blank");
+    send(&mut app, [Message::BoardNameChanged("B".into())]);
+    let mut ui = iced_test::simulator(app.view());
+    ui.click("Create").expect("a Create button");
+    for message in ui.into_messages() {
+        send(&mut app, [message]);
+    }
+    assert_eq!(names(&app), ["A", "B"]);
+}
