@@ -387,3 +387,25 @@ fn import_opens_the_new_board_cancels_a_drag_and_is_one_undo_step() {
     send(&mut app, [Message::Redo]);
     assert_eq!(names(&app), ["Job", "Work"]);
 }
+
+#[test]
+fn export_and_save_as_image_first_add_the_card_in_an_open_capture_box() {
+    let mut app = app_with_work();
+    let (work, todo) = (app.data.boards[0].id, app.data.boards[0].columns[0].id);
+    for (title, message) in [
+        ("Typed before export", Message::ExportBoard(work)),
+        ("Typed before image", Message::SaveImage(work)),
+    ] {
+        send(
+            &mut app,
+            [
+                Message::OpenCapture(todo),
+                Message::CaptureChanged(title.into()),
+                message,
+            ],
+        );
+        assert!(app.capture.is_none());
+        let cards = &app.data.boards[0].columns[0].cards;
+        assert!(cards.iter().any(|c| c.title == title), "{title}");
+    }
+}

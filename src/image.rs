@@ -130,6 +130,7 @@ impl App {
     pub(crate) fn update_image(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SaveImage(id) if !self.saving_image => {
+                self.commit_pending(); // a Card being typed goes into the image
                 let Some(board) = self.data.active_board(id).cloned() else {
                     return Task::none();
                 };
