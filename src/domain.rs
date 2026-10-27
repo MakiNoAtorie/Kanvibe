@@ -51,6 +51,7 @@ pub struct Column {
     pub name: String,
     /// Column Limit (>= 1). Exceeding it only flags the Column; Cards are still accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::repair::limit")]
     pub limit: Option<u32>,
     #[serde(default)]
     pub cards: Vec<Card>,

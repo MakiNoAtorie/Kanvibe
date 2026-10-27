@@ -1591,7 +1591,11 @@ impl App {
     /// Loads the data folder (created if missing) and reopens the last open Board, else the first.
     pub fn open(dir: PathBuf) -> Result<App, storage::LoadError> {
         fs::create_dir_all(&dir).map_err(storage::LoadError::Io)?;
-        let (data, settings) = storage::load(&dir)?.unwrap_or_default();
+        let storage::Loaded {
+            data,
+            settings,
+            repaired,
+        } = storage::open(&dir)?.unwrap_or_default();
         let ids: Vec<Id> = data.boards.iter().map(|b| b.id).collect();
         let last = settings.last_board.or(ids.first().copied());
         let current_board = data.fallback(last, &ids);
@@ -1603,6 +1607,12 @@ impl App {
             data,
             current_board,
             data_dir: Some(dir),
+            // A repaired file didn't load cleanly: rotating would push a good backup out.
+            rotation: if repaired {
+                storage::Rotation::Off
+            } else {
+                storage::Rotation::Due
+            },
             ..App::default()
         })
     }
