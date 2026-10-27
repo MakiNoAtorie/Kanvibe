@@ -67,6 +67,9 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         Key::Named(Named::Enter) if !ctrl => return Some(Message::OpenPanel),
         Key::Named(Named::F2) => return Some(Message::EditTitle),
         Key::Named(Named::Delete) => return Some(Message::ArchiveSelected),
+        Key::Character(c) if !ctrl && !modifiers.alt() && c.eq_ignore_ascii_case("l") => {
+            return Some(Message::OpenLabels);
+        }
         _ => {}
     }
     let direction = match key {

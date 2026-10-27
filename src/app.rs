@@ -12,6 +12,7 @@ use crate::domain::{Board, Column, Data, Id};
 use crate::drag::{self, Drag, Item, Target};
 use crate::history::History;
 use crate::keys::{self, Context, Input};
+use crate::labels::{self, LabelPicker};
 use crate::storage::{self, Settings};
 use iced::Point;
 use std::fs;
@@ -73,6 +74,8 @@ pub struct App {
     pub rotation: storage::Rotation,
     /// The Board whose Archive view replaces its Columns; `None` = the Columns show.
     pub archive: Option<Id>,
+    /// The Label picker over the open Card's panel; see `labels`.
+    pub label_picker: Option<LabelPicker>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +144,7 @@ pub enum Field {
     ColumnName(Id),
     CardTitle(Id),
     ChecklistItem(Id),
+    LabelName(Id),
 }
 
 impl Field {
@@ -149,7 +153,8 @@ impl Field {
             Field::BoardName(id)
             | Field::ColumnName(id)
             | Field::CardTitle(id)
-            | Field::ChecklistItem(id) => id,
+            | Field::ChecklistItem(id)
+            | Field::LabelName(id) => id,
         }
     }
 }
@@ -277,6 +282,24 @@ pub enum Message {
     /// Ctrl+Up / Ctrl+Down in the Item being edited.
     MoveEditedItem(Direction),
     RemoveItem(Id),
+    /// L, or a click on the panel's Labels row: open the Label picker.
+    OpenLabels,
+    CloseLabels,
+    /// A picker checkbox: attach or detach the Label on the picker's Card.
+    ToggleLabel(Id),
+    /// A picker pencil: open (or close) the Label's editor and start renaming it.
+    EditLabel(Id),
+    /// A palette key for the Label.
+    SetLabelColor(Id, String),
+    /// "Delete Label": asks first when the Label is on Cards.
+    DeleteLabel(Id),
+    /// The action of the delete prompt: delete the Label and strip it from every Card.
+    RemoveLabel(Id),
+    /// "+ New Label".
+    NewLabel,
+    NewLabelChanged(String),
+    NewLabelColor(String),
+    CreateLabel,
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -345,6 +368,7 @@ impl App {
             Message::Escape if self.drag.is_some() => self.drag = None, // first Esc layer
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape if self.confirm.is_some() => self.confirm = None,
+            Message::Escape if self.label_picker.is_some() => self.escape_labels(),
             Message::Escape => {
                 // One layer per press: the text field, the Archive view, the Card panel, then
                 // the selection.
@@ -450,6 +474,17 @@ impl App {
                 self.commit_pending();
                 self.change_checklist(item, |data| data.remove_item(item));
             }
+            Message::OpenLabels
+            | Message::CloseLabels
+            | Message::ToggleLabel(_)
+            | Message::EditLabel(_)
+            | Message::SetLabelColor(..)
+            | Message::DeleteLabel(_)
+            | Message::RemoveLabel(_)
+            | Message::NewLabel
+            | Message::NewLabelChanged(_)
+            | Message::NewLabelColor(_)
+            | Message::CreateLabel => return self.update_labels(message),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -506,6 +541,7 @@ impl App {
                         (CAPTURE_INPUT, Input::Capture),
                         (EDIT_INPUT, item_or_edit),
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
+                        (labels::NEW_INPUT, Input::Edit),
                     ]
                     .into_iter()
                     .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
@@ -539,7 +575,8 @@ impl App {
             }
             Message::EditChanged(text) => {
                 if let Some(edit) = &mut self.editing {
-                    let live = if text.trim().is_empty() {
+                    let clash = self.data.is_label_clash(edit.field.id(), &text);
+                    let live = if text.trim().is_empty() || clash {
                         &edit.start
                     } else {
                         &text
@@ -799,6 +836,7 @@ impl App {
                     }
                     card.and_then(|c| self.board_of_card(c))
                 }
+                Field::LabelName(label) => self.data.board_of_label(label),
                 Field::CardTitle(card) => {
                     if self.data.name(card) != Some(edit.start.as_str()) {
                         self.data.touch(card); // a changed title is the Card's own change
@@ -886,6 +924,7 @@ impl App {
         }
         self.validate_selection();
         self.validate_archive();
+        self.validate_labels();
         let on_board = |card: Id| {
             self.board().is_some_and(|b| {
                 b.columns
@@ -1024,6 +1063,10 @@ impl App {
             Some(card) => row![container(content).width(Fill), self.view_panel(card)].into(),
             None => content,
         };
+        let content: Element<_> = match &self.label_picker {
+            Some(picker) => stack![content, self.view_label_picker(picker)].into(),
+            None => content,
+        };
         let content: Element<_> = match &self.not_saved {
             Some(error) => column![
                 container(text(error))
@@ -1139,8 +1182,12 @@ impl App {
             _ => None,
         };
         let cards = col.cards.iter().enumerate().map(|(i, card)| {
+            let chips = self.board().and_then(|b| labels::chips(b, card));
             let card_box = container(
-                column![text(&card.title)].extend(card.progress().map(|p| text(p).size(12).into())),
+                column![text(&card.title)]
+                    .spacing(4)
+                    .extend(chips)
+                    .extend(card.progress().map(|p| text(p).size(12).into())),
             )
             .id(card_widget(card.id))
             .width(Fill)
@@ -1278,7 +1325,7 @@ fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
 }
 
 /// An overlay panel over the dimmed app, blocking clicks to what is below.
-fn dialog<'a>(panel: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+pub(crate) fn dialog<'a>(panel: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     let dim = |_: &iced::Theme| container::Style {
         background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
         ..Default::default()

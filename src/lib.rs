@@ -5,6 +5,7 @@ pub mod domain;
 pub mod drag;
 pub mod history;
 pub mod keys;
+pub mod labels;
 pub mod panel;
 pub mod sidebar;
 pub mod startup;

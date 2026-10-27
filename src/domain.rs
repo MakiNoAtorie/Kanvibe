@@ -23,6 +23,17 @@ pub struct Board {
     /// Archived Cards, oldest archived first.
     #[serde(default)]
     pub archived_cards: Vec<Archived>,
+    /// This Board's Labels, in display order.
+    #[serde(default)]
+    pub labels: Vec<Label>,
+}
+
+/// A Board's Label. `color` is a palette key (see `labels::PALETTE`), never an index.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Label {
+    pub id: Id,
+    pub name: String,
+    pub color: String,
 }
 
 /// A Card in its Board's Archive, remembering the Column it came from.
@@ -72,6 +83,9 @@ pub struct Card {
     pub updated: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checklist: Vec<Item>,
+    /// IDs of Labels of the Card's own Board. Read them in Board order via `Data::card_labels`.
+    #[serde(default)]
+    pub labels: Vec<Id>,
 }
 
 /// A Checklist Item. Edits target it by `id`, never by position.
@@ -109,7 +123,7 @@ pub fn now() -> String {
 }
 
 impl Data {
-    fn new_id(&mut self) -> Id {
+    pub(crate) fn new_id(&mut self) -> Id {
         self.next_id += 1;
         self.next_id
     }
@@ -135,6 +149,7 @@ impl Data {
             archived: false,
             columns,
             archived_cards: Vec::new(),
+            labels: Vec::new(),
         });
         Some(id)
     }
@@ -243,6 +258,7 @@ impl Data {
             created: now.clone(),
             updated: now,
             checklist: Vec::new(),
+            labels: Vec::new(),
         });
         Some(id)
     }
@@ -361,45 +377,61 @@ impl Data {
         }
     }
 
-    /// The name of the Board or Column, or the title of the Card, with this ID.
+    /// The name of the Board, Column or Label, or the title of the Card, with this ID.
     pub fn name(&self, id: Id) -> Option<&str> {
         let found = self.boards.iter().find_map(|b| {
             if b.id == id {
                 return Some(b.name.as_str());
             }
-            b.columns.iter().find_map(|c| {
-                if c.id == id {
-                    return Some(c.name.as_str());
-                }
-                c.cards
-                    .iter()
-                    .find(|x| x.id == id)
-                    .map(|x| x.title.as_str())
-            })
+            b.columns
+                .iter()
+                .find_map(|c| {
+                    if c.id == id {
+                        return Some(c.name.as_str());
+                    }
+                    c.cards
+                        .iter()
+                        .find(|x| x.id == id)
+                        .map(|x| x.title.as_str())
+                })
+                .or_else(|| {
+                    b.labels
+                        .iter()
+                        .find(|l| l.id == id)
+                        .map(|l| l.name.as_str())
+                })
         });
         found.or_else(|| self.item(id).map(|i| i.text.as_str()))
     }
 
     /// Renames the Board or Column, or retitles the Card, with this ID to the trimmed name.
-    /// A blank name changes nothing. Does not touch `updated`: the caller does on commit.
+    /// A blank name, or a Label name that clashes on its Board, changes nothing. Does not touch `updated`: the caller does on commit.
     pub fn rename(&mut self, id: Id, name: &str) -> Option<()> {
         let name = name.trim();
-        if name.is_empty() {
+        if name.is_empty() || self.is_label_clash(id, name) {
             return None;
         }
         let target = self.boards.iter_mut().find_map(|b| {
             if b.id == id {
                 return Some(&mut b.name);
             }
-            b.columns.iter_mut().find_map(|c| {
-                if c.id == id {
-                    return Some(&mut c.name);
-                }
-                c.cards
-                    .iter_mut()
-                    .find(|x| x.id == id)
-                    .map(|x| &mut x.title)
-            })
+            b.columns
+                .iter_mut()
+                .find_map(|c| {
+                    if c.id == id {
+                        return Some(&mut c.name);
+                    }
+                    c.cards
+                        .iter_mut()
+                        .find(|x| x.id == id)
+                        .map(|x| &mut x.title)
+                })
+                .or_else(|| {
+                    b.labels
+                        .iter_mut()
+                        .find(|l| l.id == id)
+                        .map(|l| &mut l.name)
+                })
         });
         match target {
             Some(target) => *target = name.into(),
