@@ -57,6 +57,8 @@ pub struct App {
     pub closing: Closing,
     /// The Card the Card panel shows. It follows the selected Card; see `validate_ui`.
     pub panel: Option<Id>,
+    /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
+    pub rotation: storage::Rotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1018,6 +1020,12 @@ impl App {
         }
         if self.failed.as_ref() == Some(&state) {
             return None; // wait for a change or the retry timer
+        }
+        // ponytail: rotation runs here on the UI thread (a file copy, at most once per session or
+        // per 24 h, never while a write is in flight); move it into `SaveJob::run` if it ever stalls.
+        let changed = self.saved.0 != state.0;
+        if let Err(e) = storage::rotate(&dir, &mut self.rotation, changed) {
+            eprintln!("Backups not rotated: {e}");
         }
         self.writing = Some(state.clone());
         let (data, settings) = state;

@@ -56,6 +56,12 @@
 - Overlays: `stack![content, opaque(center(panel).style(dim))]`, as in `view_close_dialog`.
 - Storage tests: `send` runs `while let Some(job) = app.save_if_changed() { app.update(job.run()) }`; `send_while_writing` holds a job; `block_saves(dir)` (a folder named `kanvibe.json.tmp`) forces a failure.
 
+## Backup rotation (#20)
+- `storage::rotate(dir, &mut rotation, data_changed)` runs in `save_if_changed` right before a `SaveJob` is created (UI thread, never while a write is in flight). `App.rotation: storage::Rotation::{Due, Done, Off}`; `data_changed` = `saved.0 != data` (settings-only changes don't count).
+- `Rotation::Off` disables rotation and the 24 h rule for the session; set it when a file didn't load cleanly (startup Restore/Start empty; #22 load repair sets it in `App::open`). A failed rotation stays `Due`.
+- `.bak1` is written with `write_all` + `sync_all`, not `fs::copy` (which keeps the source mtime on Windows).
+- Storage test helpers: `saved_sample(dir)`, `create_board(app, name)`, `backups(dir)`, `read(dir, name)`, `age(dir, name, hours)`. Compare file contents as strings, not bytes.
+
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.
