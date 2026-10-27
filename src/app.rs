@@ -1789,7 +1789,8 @@ fn moved(
 }
 
 /// Where Ctrl+arrow moves the selected Card: (Card, Column, index). `None` = no Card or at an end.
-/// Up/Down go just before the previous / just after the next Card `shown` by the Filter.
+/// Up/Down go just before the previous / just after the next Card `shown` by the Filter;
+/// Left/Right go after the last shown Card of the neighbouring Column.
 fn card_move(
     board: &Board,
     selection: Selection,
@@ -1806,8 +1807,15 @@ fn card_move(
             let next = i + 1 + cards[i + 1..].iter().position(&shown)?;
             Some((card, column.id, next))
         }
-        Direction::Left => Some((card, board.columns.get(ci.checked_sub(1)?)?.id, usize::MAX)),
-        Direction::Right => Some((card, board.columns.get(ci + 1)?.id, usize::MAX)),
+        Direction::Left | Direction::Right => {
+            let next = match direction {
+                Direction::Left => board.columns.get(ci.checked_sub(1)?)?,
+                _ => board.columns.get(ci + 1)?,
+            };
+            // After the last visible Card, as a drop on the Column body (the bottom unfiltered).
+            let at = filter::placement(&next.cards, next.cards.len(), &shown);
+            Some((card, next.id, at))
+        }
     }
 }
 

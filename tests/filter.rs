@@ -434,3 +434,20 @@ fn filter_text_also_matches_label_names() {
     assert_eq!(shown(&app, 0), ["B"]);
     assert!(!app.nothing_matches());
 }
+
+#[test]
+fn ctrl_left_right_under_a_filter_lands_after_the_last_visible_card() {
+    use kanvibe::app::Direction::*;
+    let mut app = app_with(&[&["bug 1"], &["bug 2", "h1", "h2"]]);
+    send(&mut app, [Message::FilterChanged("bug".into())]);
+    select(&mut app, "bug 1");
+    send(&mut app, [Message::MoveCard(Right)]);
+    assert_eq!(titles(&app, 1), ["bug 2", "bug 1", "h1", "h2"]); // as a drop on the Column body
+    send(&mut app, [Message::MoveCard(Left)]);
+    assert_eq!(titles(&app, 0), ["bug 1"]);
+    // No Filter: the bottom of the Column, as before.
+    send(&mut app, [Message::ClearFilter]);
+    select(&mut app, "bug 1");
+    send(&mut app, [Message::MoveCard(Right)]);
+    assert_eq!(titles(&app, 1), ["bug 2", "h1", "h2", "bug 1"]);
+}
