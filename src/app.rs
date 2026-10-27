@@ -1,9 +1,9 @@
 //! The iced program: state, Message, `update` (the only place state changes) and `view`.
 use iced::widget::mouse_area;
 use iced::widget::{
-    button, center, column, container, operation, row, scrollable, text, text_input,
+    button, center, column, container, operation, row, scrollable, text, text_input, tooltip,
 };
-use iced::{Element, Event, Fill, Subscription, Task, event, keyboard};
+use iced::{Center, Element, Event, Fill, Subscription, Task, event, keyboard};
 use iced::{time, window};
 
 use crate::domain::{Board, Column, Data, Id};
@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
 const EDIT_INPUT: &str = "edit";
+const LIMIT_INPUT: &str = "limit";
 /// How long after the last keystroke a pending edit's live text is written to disk.
 const IDLE_WRITE: Duration = Duration::from_secs(1);
 
@@ -36,6 +37,16 @@ pub struct App {
     /// The rename in progress. At most one text edit is pending: this or `capture`.
     /// See `commit_pending`.
     pub editing: Option<PendingEdit>,
+    /// The Column whose header ⋯ menu is open.
+    pub column_menu: Option<Id>,
+    /// The "Set limit…" prompt; stays open until a valid value is submitted or Esc.
+    pub limit_input: Option<LimitInput>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LimitInput {
+    pub column: Id,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,6 +101,14 @@ pub enum Message {
     EditTick(Instant),
     /// The window's close button: commits the pending edit, saves, exits.
     CloseRequested,
+    /// "+ Add Column" on this Board.
+    AddColumn(Id),
+    /// The ⋯ button in a Column header.
+    ToggleColumnMenu(Id),
+    /// "Set limit…" in the Column menu.
+    OpenLimit(Id),
+    LimitChanged(String),
+    SubmitLimit,
 }
 
 impl App {
@@ -138,6 +157,8 @@ impl App {
             }
             Message::Escape => {
                 self.board_name = None;
+                self.column_menu = None;
+                self.limit_input = None;
                 self.capture = None; // Esc discards the capture box; other fields commit.
                 self.commit_pending();
             }
@@ -194,6 +215,41 @@ impl App {
                 // ponytail: exits even if the save fails; #21 adds the Retry / Save a copy / Quit dialog.
                 return iced::exit();
             }
+            Message::AddColumn(board) => {
+                self.commit_pending();
+                if self.data.add_column(board).is_some() {
+                    self.history
+                        .record(&self.data.boards, Some(board), Some(board));
+                }
+            }
+            Message::ToggleColumnMenu(column) => {
+                self.commit_pending();
+                self.limit_input = None;
+                self.column_menu = (self.column_menu != Some(column)).then_some(column);
+            }
+            Message::OpenLimit(column) => {
+                self.commit_pending();
+                self.column_menu = None;
+                if let Some(col) = self.find_column(column) {
+                    let text = col.limit.map(|l| l.to_string()).unwrap_or_default();
+                    self.limit_input = Some(LimitInput { column, text });
+                    return operation::focus(LIMIT_INPUT);
+                }
+            }
+            Message::LimitChanged(text) => {
+                if let Some(input) = &mut self.limit_input {
+                    input.text = text;
+                }
+            }
+            Message::SubmitLimit => {
+                if let Some(LimitInput { column, text }) = self.limit_input.clone()
+                    && self.data.set_limit(column, &text).is_some()
+                {
+                    self.limit_input = None;
+                    let board = self.board_of_column(column);
+                    self.history.record(&self.data.boards, board, board);
+                }
+            }
         }
         Task::none()
     }
@@ -214,6 +270,14 @@ impl App {
             };
             self.history.record(&self.data.boards, board, board);
         }
+    }
+
+    fn find_column(&self, column: Id) -> Option<&Column> {
+        self.data
+            .boards
+            .iter()
+            .flat_map(|b| &b.columns)
+            .find(|c| c.id == column)
     }
 
     fn board_of_column(&self, column: Id) -> Option<Id> {
@@ -260,9 +324,18 @@ impl App {
                 .on_input(Message::EditChanged)
                 .on_submit(Message::CommitEdit)
                 .into(),
-            _ => mouse_area(text(name).size(size))
-                .on_double_click(Message::StartEdit(field))
-                .into(),
+            // One line, clipped (iced has no ellipsis), full name in a tooltip.
+            _ => {
+                let label = mouse_area(text(name).size(size).wrapping(text::Wrapping::None))
+                    .on_double_click(Message::StartEdit(field));
+                let full = container(text(name))
+                    .padding(4)
+                    .style(container::rounded_box);
+                container(tooltip(label, full, tooltip::Position::Bottom))
+                    .width(Fill)
+                    .clip(true)
+                    .into()
+            }
         }
     }
 
@@ -279,7 +352,14 @@ impl App {
     }
 
     fn view_board<'a>(&'a self, board: &'a Board) -> Element<'a, Message> {
-        let columns = board.columns.iter().map(|c| self.view_column(c));
+        let columns = board
+            .columns
+            .iter()
+            .map(|c| self.view_column(c))
+            .chain([button("+ Add Column")
+                .style(button::secondary)
+                .on_press(Message::AddColumn(board.id))
+                .into()]);
         column![
             self.editable_name(Field::BoardName(board.id), &board.name, 20),
             scrollable(row(columns).spacing(12).height(Fill))
@@ -310,13 +390,43 @@ impl App {
                 .on_press(Message::OpenCapture(col.id))
                 .into(),
         };
+        let count = text(col.count_label());
+        let count = if col.over_limit() {
+            count.style(text::danger)
+        } else {
+            count
+        };
+        let header = row![
+            self.editable_name(Field::ColumnName(col.id), &col.name, 16),
+            count,
+            button("⋯")
+                .style(button::text)
+                .on_press(Message::ToggleColumnMenu(col.id)),
+        ]
+        .spacing(8)
+        .align_y(Center);
+        let menu: Option<Element<_>> = match &self.limit_input {
+            Some(input) if input.column == col.id => Some(
+                text_input("Limit (blank removes)", &input.text)
+                    .id(LIMIT_INPUT)
+                    .on_input(Message::LimitChanged)
+                    .on_submit(Message::SubmitLimit)
+                    .into(),
+            ),
+            _ if self.column_menu == Some(col.id) => Some(
+                button("Set limit…")
+                    .style(button::secondary)
+                    .on_press(Message::OpenLimit(col.id))
+                    .into(),
+            ),
+            _ => None,
+        };
         container(
-            column![
-                self.editable_name(Field::ColumnName(col.id), &col.name, 16),
-                scrollable(column(cards).spacing(6)).height(Fill),
-                footer
-            ]
-            .spacing(8),
+            column![header]
+                .extend(menu)
+                .push(scrollable(column(cards).spacing(6)).height(Fill))
+                .push(footer)
+                .spacing(8),
         )
         .width(280)
         .height(Fill)

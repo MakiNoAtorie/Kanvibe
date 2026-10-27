@@ -23,8 +23,26 @@ pub struct Board {
 pub struct Column {
     pub id: Id,
     pub name: String,
+    /// Column Limit (>= 1). Exceeding it only flags the Column; Cards are still accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
     #[serde(default)]
     pub cards: Vec<Card>,
+}
+
+impl Column {
+    /// More Cards than the Column Limit.
+    pub fn over_limit(&self) -> bool {
+        self.limit.is_some_and(|l| self.cards.len() > l as usize)
+    }
+
+    /// The header count: "n", or "n/limit" with a Column Limit.
+    pub fn count_label(&self) -> String {
+        match self.limit {
+            Some(limit) => format!("{}/{limit}", self.cards.len()),
+            None => self.cards.len().to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -50,6 +68,7 @@ impl Data {
             .map(|name| Column {
                 id: self.new_id(),
                 name: name.into(),
+                limit: None,
                 cards: Vec::new(),
             })
             .into();
@@ -59,6 +78,37 @@ impl Data {
             columns,
         });
         Some(id)
+    }
+
+    /// Appends an empty Column after the Board's last one. An unknown Board creates nothing.
+    pub fn add_column(&mut self, board: Id) -> Option<Id> {
+        let id = self.new_id();
+        let board = self.boards.iter_mut().find(|b| b.id == board)?;
+        board.columns.push(Column {
+            id,
+            name: "New column".into(),
+            limit: None,
+            cards: Vec::new(),
+        });
+        Some(id)
+    }
+
+    /// Sets the Column Limit from typed text: a positive integer, or blank to remove it.
+    /// Anything else (or an unknown Column) changes nothing and returns `None`.
+    pub fn set_limit(&mut self, column: Id, input: &str) -> Option<()> {
+        let input = input.trim();
+        let limit = if input.is_empty() {
+            None
+        } else {
+            Some(input.parse::<u32>().ok().filter(|l| *l >= 1)?)
+        };
+        let column = self
+            .boards
+            .iter_mut()
+            .flat_map(|b| &mut b.columns)
+            .find(|c| c.id == column)?;
+        column.limit = limit;
+        Some(())
     }
 
     /// Appends a Card to the bottom of a Column. A blank title, or an unknown Column, creates nothing.
