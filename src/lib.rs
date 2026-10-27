@@ -8,6 +8,7 @@ pub mod drag;
 pub mod history;
 pub mod keys;
 pub mod labels;
+pub mod move_board;
 pub mod panel;
 pub mod repair;
 pub mod sidebar;

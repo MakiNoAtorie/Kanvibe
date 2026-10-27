@@ -41,9 +41,15 @@ impl App {
                 self.editable_name(Field::CardTitle(card.id), &card.title, 20),
                 self.view_description(card),
                 self.labels_row(card),
-                button("Archive Card")
-                    .style(button::secondary)
-                    .on_press(Message::ArchiveCard(card.id)),
+                row![
+                    button("Move to Board…")
+                        .style(button::secondary)
+                        .on_press(Message::OpenMove),
+                    button("Archive Card")
+                        .style(button::secondary)
+                        .on_press(Message::ArchiveCard(card.id)),
+                ]
+                .spacing(8),
                 text(times).size(12),
                 self.view_checklist(card),
             ]
