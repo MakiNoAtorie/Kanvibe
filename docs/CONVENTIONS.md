@@ -35,9 +35,9 @@
 ## Selection and keys (#7, `src/keys.rs`)
 - Key flow: subscription sends `Message::Key(event)` for uncaptured presses; `update` queries focus, then `Message::KeyWithFocus(event, Option<selector::Target>)` builds `keys::Context` and runs `keys::map`, whose Message goes back through `update`. Tests send `KeyWithFocus(event, None)` or call `keys::map`.
 - A captured Esc is sent as `Message::Escape` (the "leave text field" layer). New Esc layers go in that arm; it clears selection only when nothing else is open.
-- A focused text field suppresses arrows, Ctrl+arrows, N; Ctrl+Z/Y and Esc still map. Every new text box needs a widget Id and a `keys::Input` variant wired into the `KeyWithFocus` Id table. `keys::Context` holds `focused` only; panel/archive/drag/dialog get added by their tickets.
+- A focused text field suppresses arrows, Ctrl+arrows, N; Ctrl+Z/Y and Esc still map. Every new text box needs a widget Id and a `keys::Input` variant wired into the `KeyWithFocus` Id table. `keys::Context` has `focused` and `dragging`; dialogs are gated in `App::allowed` via `App::dialog_open()`. Exception: Ctrl+B/I/K are `text_editor` key bindings (`description::key_binding`), not `keys::map`, because the editor captures them.
 - New shortcuts: new `Message` variant + arm in `keys::map`. Use `Message::Undo`/`Message::Redo`. `Message` derives `PartialEq`.
-- `App.selection: Option<Selection { column, card }>`; `Message::Select(Selection)`. Anything changing the selection returns `reveal_selection()`. `App::validate_selection()` after undo/redo, Board creation, Board switch, import. `outlined(base_style, selected)` style helper. `Data::move_card(card, column, index)` (index clamped).
+- `App.selection: Option<Selection { column, card }>`; `Message::Select(Selection)`. Anything changing the selection returns `reveal_selection()`. `validate_ui` runs `validate_selection()` after every update; don't call it per arm. `outlined(base_style, selected)` style helper. `Data::move_card(card, column, index)` (index clamped).
 - Widget Ids: `BOARD_SCROLL`, `column_widget(id)`, `cards_widget(id)`, `card_widget(id)`; `reveal(scrollable, child, horizontal)`.
 - Test helpers (`tests/update.rs`): `key(Named, ctrl)`, `app_with_cards()` (To do: A,B,C; Doing empty; Done: D), `selected(app, col, Option<card>)`, `card_id`.
 
@@ -51,7 +51,7 @@
 ## Saving (#21)
 - `App::save_if_changed() -> Option<SaveJob>` runs after every `update` and never writes; it returns `None` while a pending edit has unwritten keystrokes or a write is in flight. `SaveJob::run(self) -> Message::Saved(Result<(), String>)` is the one place a save happens (backup rotation hooks there or in `storage::save`). `Screen::update` runs jobs on a `std::thread`.
 - App fields: `writing`, `failed` (held from retry until a change or `RetrySave`), `not_saved` (bar text, built by `fn not_saved(path, io::Error)`), `closing: Closing::{No, Waiting, Asking, Exiting}`.
-- Messages `Saved`, `RetrySave` (10 s timer + Retry button), `SaveCopy`, `CopySaved(Option<Result<(), String>>)` (`None` = dialog cancelled), `QuitWithoutSaving`. Arms that don't change domain data must not call `commit_pending`.
+- Messages `Saved`, `RetrySave` (10 s timer + Retry button), `SaveCopy`, `CopySaved(Option<Result<(), String>>)` (`None` = dialog cancelled), `QuitWithoutSaving`. Save-result arms (`Saved`, `RetrySave`, `CopySaved`) must not call `commit_pending`; arms that change domain data or UI context call it first.
 - Settings for a save come from private `App::settings()`; theme, sidebar, window go there.
 - Overlays: `stack![content, opaque(center(panel).style(dim))]`, as in `view_close_dialog`.
 - Storage tests: `send` runs `while let Some(job) = app.save_if_changed() { app.update(job.run()) }`; `send_while_writing` holds a job; `block_saves(dir)` (a folder named `kanvibe.json.tmp`) forces a failure.
@@ -144,6 +144,15 @@
 - Layout: 12 px padding, 280 px Columns, 12 px gaps: width = 292·n + 12.
 - `iced_test::simulator(app.view()).find("text")` checks view text in tests (starts a GPU device; use sparingly). Clippy: `as_chunks::<4>().0` for RGBA, not `chunks_exact(4)`.
 
+## After the whole-spec review
+- Lookups from a Card/Column go through `Data::{board_of_card, column_of_card, board_of_column, board_of_archived, column, holding}`; don't add lookups on `App`.
+- `App::record_step(board)` records a step showing one Board; call `history.record` directly only for a cross-Board move. `commit_pending()` and `History::record` return `bool` (step recorded).
+- A Card leaving the Board goes through `App::card_leaves(card, |data| …)` (selection + panel); the caller records the step.
+- `App::dialog_open()` lists overlays that pass only Esc; new dialogs go there. `App::field_open()` lists stateful text boxes (Esc and `LeaveField`); new ones go there.
+- View helpers: `app::{clipped, clipped_text, board_name_input, dialog_header}`, `domain::cards(n)`, `transfer::stem(name)`.
+- Settings file shape lives in private `SettingsFile` in storage.rs (`"theme"`, `"window": {x, y, w, h, maximized}`); new settings go there and in both `From` impls.
+- `App::same` ignores window geometry except while closing. A leftover `kanvibe.json.tmp` is removed only after a successful `storage::open`.
+
 ## Esc order (current)
 - cancel drag → shortcuts overlay → notice → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Board menu / Labels filter list → Archive view → panel → filter → selection.
 
@@ -151,10 +160,9 @@
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.
 - Undo/redo replace `data.boards` only; `next_id` and UI state are never restored.
-- `Message::Key(keyboard::Event)` carries key presses; `undo_shortcut` in `app.rs` is to be folded into the key-mapping function (#7). Test helper `ctrl("z"|"y", shift)`.
 
 ## Storage (`src/storage.rs`)
-- `storage::{data_dir(args), load(dir) -> io::Result<Option<(Data, Settings)>>, save(dir, &Data, &Settings)}`. `Ok(None)` = first run; content error = `ErrorKind::InvalidData`.
+- `storage::{data_dir(args), open(dir), load(dir), save(dir, &Data, &Settings)}`; see Startup and Load repair for return types.
 - File format lives in private `FileOut`/`FileIn` structs. Domain types carry serde derives; `Data` does not. New optional fields get `#[serde(default)]`.
 - `Settings` (`#[serde(default)]`) holds saved app settings (today `last_board`); theme, sidebar and window go there too.
 - `App.data_dir: Option<PathBuf>` (`None` saves nothing, so `tests/update.rs` is unaffected); `App.saved: (Data, Settings)` mirrors disk.
