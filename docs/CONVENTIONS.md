@@ -56,5 +56,5 @@
 ## Windows tooling gotchas
 - In worktrees, Bash heredocs and multi-step git commands may be refused by the isolation check; use Write/Edit and simple git commands.
 - PowerShell 5.1: `git commit -F -` with a here-string breaks; write the message to a file and use `-F <file>`.
-- Concurrent cargo builds sharing one `target` dir fail with LNK1104; use a separate `CARGO_TARGET_DIR` per build.
+- Disk: one shared build dir. Agents set `CARGO_TARGET_DIR` to the main checkout's `target/` (cargo locks it, so concurrent builds queue instead of each costing ~3 GB). Never create per-worktree or scratch target dirs.
 - Long worktree paths can hit MAX_PATH (LNK1104) on release builds; use a shorter `--target-dir`.
