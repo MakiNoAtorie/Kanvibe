@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::widget::text_editor::{Action, Binding, Edit, KeyPress, Motion, Status};
-use iced::widget::{button, column, container, markdown, row, space, text, text_editor, tooltip};
+use iced::widget::{button, column, markdown, row, space, text, text_editor};
 use iced::{Center, Element, Font};
 
 use crate::app::{App, Field, Message};
@@ -105,14 +105,11 @@ impl App {
                 .spacing(6)
                 .into();
         }
-        let edit = tooltip(
+        let edit = crate::chrome::tip(
             button("Edit")
                 .style(button::secondary)
                 .on_press(Message::EditDescription),
-            container(text("Edit description (E)"))
-                .padding(4)
-                .style(container::rounded_box),
-            tooltip::Position::Bottom,
+            "Edit description (E)",
         );
         let body: Element<_> = match card.description.is_empty() {
             true => text("No description").style(text::secondary).into(),

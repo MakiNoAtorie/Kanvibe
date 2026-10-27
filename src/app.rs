@@ -420,9 +420,8 @@ impl App {
                 let name = self.board_name.as_deref().unwrap_or_default();
                 if let Some(id) = self.data.create_board(name) {
                     self.current_board = Some(id);
-                    self.validate_selection();
                     self.board_name = None;
-                    self.history.record(&self.data.boards, None, None);
+                    self.record_step(None);
                 }
             }
             Message::OpenCapture(column) => {
@@ -458,11 +457,8 @@ impl App {
             Message::Escape => {
                 // One layer per press: the text field, the Archive view, the Card panel, the
                 // Filter, then the selection.
-                if self.board_name.is_none()
-                    && self.capture.is_none()
-                    && self.editing.is_none()
+                if !self.field_open()
                     && self.column_menu.is_none()
-                    && self.limit_input.is_none()
                     && !self.board_menu
                     && !self.filter_menu
                     && self.archive.take().is_none()
@@ -630,13 +626,17 @@ impl App {
                         column,
                         card: Some(card),
                     });
-                    let board = self.current_board;
-                    self.history.record(&self.data.boards, board, board);
+                    self.record_step(self.current_board);
                     return self.reveal_selection();
                 }
             }
             Message::Undo | Message::Redo => {
-                self.commit_pending();
+                // An unchanged edit just closes; an open, empty Capture box holds no edit, so
+                // Ctrl+Z there undoes the last Card as usual.
+                let editing = self.editing.is_some();
+                if !self.commit_pending() && editing && message == Message::Undo {
+                    return Task::none();
+                }
                 self.drag = None;
                 let step = match message {
                     Message::Undo => self.history.undo(),
@@ -647,7 +647,6 @@ impl App {
                     if show.is_some() {
                         self.current_board = show;
                     }
-                    self.validate_selection();
                 }
             }
             Message::Key(event) => {
@@ -678,13 +677,13 @@ impl App {
                 let focused = focused.and_then(input);
                 let dragging = self.drag.is_some();
                 let message = keys::map(&event, &Context { focused, dragging });
-                // The Archive view and any question leave only Esc (and Undo/Redo in the view).
+                // A dialog leaves only Esc; the Archive view also Undo/Redo.
                 let allowed = |m: &Message| match m {
                     Message::Escape => true,
-                    Message::Undo | Message::Redo => self.confirm.is_none(),
-                    _ => self.archive.is_none() && self.confirm.is_none(),
+                    _ if self.dialog_open() => false,
+                    Message::Undo | Message::Redo => true,
+                    _ => self.archive.is_none(),
                 };
-                let message = message.filter(|m| *m == Message::Escape || self.notice.is_none());
                 if let Some(message) = message.filter(allowed) {
                     return self.update(message);
                 }
@@ -727,7 +726,7 @@ impl App {
                     edit.typed_at = Some(Instant::now());
                 }
             }
-            Message::CommitEdit => self.commit_pending(),
+            Message::CommitEdit => _ = self.commit_pending(),
             Message::EditTick(now) => {
                 if let Some(edit) = &mut self.editing
                     && edit.typed_at.is_some_and(|t| now >= t + IDLE_WRITE)
@@ -786,8 +785,7 @@ impl App {
             Message::AddColumn(board) => {
                 self.commit_pending();
                 if self.data.add_column(board).is_some() {
-                    self.history
-                        .record(&self.data.boards, Some(board), Some(board));
+                    self.record_step(Some(board));
                 }
             }
             Message::ToggleColumnMenu(column) => {
@@ -798,7 +796,7 @@ impl App {
             Message::OpenLimit(column) => {
                 self.commit_pending();
                 self.column_menu = None;
-                if let Some(col) = self.find_column(column) {
+                if let Some(col) = self.data.column(column) {
                     let text = col.limit.map(|l| l.to_string()).unwrap_or_default();
                     self.limit_input = Some(LimitInput { column, text });
                     return operation::focus(LIMIT_INPUT);
@@ -814,8 +812,7 @@ impl App {
                     && self.data.set_limit(column, &text).is_some()
                 {
                     self.limit_input = None;
-                    let board = self.board_of_column(column);
-                    self.history.record(&self.data.boards, board, board);
+                    self.record_step(self.data.board_of_column(column));
                 }
             }
             Message::CopySaved(Some(Err(e))) => self.not_saved = Some(e),
@@ -829,18 +826,18 @@ impl App {
             Message::ArchiveBoard(board) => {
                 self.commit_pending();
                 if self.data.archive_board(board).is_some() {
-                    self.history.record(&self.data.boards, None, None);
+                    self.record_step(None);
                 }
             }
             Message::AskDeleteBoard(id) => {
                 if let Some(board) = self.data.boards.iter().find(|b| b.id == id && b.archived) {
-                    let cards: usize = board.columns.iter().map(|c| c.cards.len()).sum();
+                    let active: usize = board.columns.iter().map(|c| c.cards.len()).sum();
                     let archived = board.archived_cards.len();
-                    let plural = if cards == 1 { "" } else { "s" };
                     let prompt = format!(
-                        "Permanently delete Board \"{}\" with {cards} Card{plural} ({archived} archived)? \
+                        "Permanently delete Board \"{}\" with {} ({archived} archived)? \
                          You can undo this until Kanvibe closes.",
-                        board.name
+                        board.name,
+                        crate::domain::cards(active + archived)
                     );
                     let action = Message::DeleteBoard(id);
                     self.confirm = Some(Confirm { prompt, action });
@@ -849,7 +846,7 @@ impl App {
             Message::DeleteBoard(board) => {
                 self.commit_pending();
                 if self.data.delete_board(board).is_some() {
-                    self.history.record(&self.data.boards, None, None);
+                    self.record_step(None);
                 }
             }
             Message::ToggleSidebar => self.sidebar_collapsed = !self.sidebar_collapsed,
@@ -882,7 +879,7 @@ impl App {
             Message::RestoreBoard(board) => {
                 self.commit_pending();
                 if self.data.restore_board(board).is_some() {
-                    self.history.record(&self.data.boards, None, None);
+                    self.record_step(None);
                 }
             }
             Message::DragPress(item) => {
@@ -910,7 +907,7 @@ impl App {
                 };
                 match (drag.item, drag.target()) {
                     (Item::Card(card), _) if !drag.started => {
-                        if let Some(column) = self.column_of_card(card) {
+                        if let Some(column) = self.data.column_of_card(card) {
                             let card = Some(card);
                             return self.update(Message::Select(Selection { column, card }));
                         }
@@ -925,12 +922,11 @@ impl App {
                     (Item::Card(card), Some(target)) => self.drop_card(card, target),
                     (Item::Column(column), Some(Target::ColumnGap(gap))) => {
                         self.data.move_column(column, gap);
-                        let board = self.board_of_column(column);
-                        self.history.record(&self.data.boards, board, board);
+                        self.record_step(self.data.board_of_column(column));
                     }
                     (Item::Board(board), Some(Target::BoardGap(gap))) => {
                         self.data.move_board(board, gap);
-                        self.history.record(&self.data.boards, None, None);
+                        self.record_step(None);
                     }
                     _ => {} // released outside any target, or on the wrong kind: cancel
                 }
@@ -958,7 +954,7 @@ impl App {
             Target::Column(column) => (column, usize::MAX),
             _ => return,
         };
-        let cards = self.find_column(column).map_or(&[][..], |c| &c.cards);
+        let cards = self.data.column(column).map_or(&[][..], |c| &c.cards);
         let gap = filter::placement(cards, gap, |c| self.shown(c));
         // The Card leaves its own slot first, so a later gap in its Column moves up by one.
         let from = cards.iter().position(|x| x.id == card);
@@ -967,22 +963,44 @@ impl App {
             _ => gap,
         };
         self.data.move_card(card, column, index);
-        self.validate_selection();
-        let board = self.board_of_column(column);
-        self.history.record(&self.data.boards, board, board);
+        self.record_step(self.data.board_of_column(column));
     }
 
-    fn column_of_card(&self, card: Id) -> Option<Id> {
-        let mut columns = self.data.boards.iter().flat_map(|b| &b.columns);
-        columns
-            .find(|c| c.cards.iter().any(|x| x.id == card))
-            .map(|c| c.id)
+    /// Records an undo step (if anything changed) that shows `board` on undo and on redo;
+    /// `None` keeps the current Board. `true` when a step was recorded.
+    pub(crate) fn record_step(&mut self, board: Option<Id>) -> bool {
+        self.history.record(&self.data.boards, board, board)
+    }
+
+    /// A text box with state is open: the Board name prompt, Capture box, pending edit or limit.
+    pub(crate) fn field_open(&self) -> bool {
+        self.board_name.is_some()
+            || self.capture.is_some()
+            || self.editing.is_some()
+            || self.limit_input.is_some()
+    }
+
+    /// An overlay that leaves only Esc to the keyboard: shortcuts, notice, close dialog,
+    /// confirmation, Label picker or Move list.
+    fn dialog_open(&self) -> bool {
+        self.shortcuts
+            || self.notice.is_some()
+            || self.closing_dialog()
+            || self.confirm.is_some()
+            || self.label_picker.is_some()
+            || self.move_picker.is_some()
+    }
+
+    /// The close dialog (Retry / Save a copy as… / Quit without saving) shows.
+    fn closing_dialog(&self) -> bool {
+        matches!(self.closing, Closing::Asking | Closing::Waiting) && self.not_saved.is_some()
     }
 
     /// Commits the text edit in progress, if any, as one undo step (none if nothing changed),
     /// and closes its field. A Capture box adds its Card. Call it first in every arm that
-    /// changes domain data or UI context.
-    pub fn commit_pending(&mut self) {
+    /// changes domain data or UI context. `true` when a step was recorded.
+    pub fn commit_pending(&mut self) -> bool {
+        let mut recorded = false;
         if let Some(capture) = self.capture.take() {
             if let Some(card) = self.data.add_card(capture.column, &capture.text) {
                 self.selection = Some(Selection {
@@ -993,13 +1011,12 @@ impl App {
                     self.filter_kept.push(card); // a Card just created stays visible
                 }
             }
-            let board = self.board_of_column(capture.column);
-            self.history.record(&self.data.boards, board, board);
+            recorded |= self.record_step(self.data.board_of_column(capture.column));
         }
         if let Some(edit) = self.editing.take() {
             let board = match edit.field {
                 Field::BoardName(_) => None,
-                Field::ColumnName(column) => self.board_of_column(column),
+                Field::ColumnName(column) => self.data.board_of_column(column),
                 Field::ChecklistItem(item) => {
                     let card = self.data.card_of_item(item);
                     if edit.text.trim().is_empty() {
@@ -1011,24 +1028,25 @@ impl App {
                     } else if self.data.name(item) != Some(edit.start.as_str()) {
                         card.inspect(|c| self.data.touch(*c));
                     }
-                    card.and_then(|c| self.board_of_card(c))
+                    card.and_then(|c| self.data.board_of_card(c))
                 }
                 Field::LabelName(label) => self.data.board_of_label(label),
                 Field::Description(card) => {
                     if self.data.description(card) != Some(edit.start.as_str()) {
                         self.data.touch(card);
                     }
-                    self.board_of_card(card)
+                    self.data.board_of_card(card)
                 }
                 Field::CardTitle(card) => {
                     if self.data.name(card) != Some(edit.start.as_str()) {
                         self.data.touch(card); // a changed title is the Card's own change
                     }
-                    self.board_of_card(card)
+                    self.data.board_of_card(card)
                 }
             };
-            self.history.record(&self.data.boards, board, board);
+            recorded |= self.record_step(board);
         }
+        recorded
     }
 
     /// Adds a blank Item to the Card and opens it for typing; the add is recorded on commit.
@@ -1046,8 +1064,7 @@ impl App {
         };
         if change(&mut self.data).is_some() {
             self.data.touch(card);
-            let board = self.board_of_card(card);
-            self.history.record(&self.data.boards, board, board);
+            self.record_step(self.data.board_of_card(card));
         }
     }
 
@@ -1063,25 +1080,23 @@ impl App {
         Task::batch([column, card])
     }
 
-    /// Keeps the selection on the current Board: it follows its Card to another Column and is
-    /// cleared when its Card or Column is gone.
-    // ponytail: called where Boards can change under the selection (undo/redo, Board switch);
-    // the spec's "after every update" check can replace these calls.
+    /// Part of `validate_ui`: keeps the selection on the current Board. It follows its Card to
+    /// another Column and is cleared when its Card or Column is gone.
     fn validate_selection(&mut self) {
-        let Some(board) = self.board() else {
-            self.selection = None;
-            return;
+        let here = |column: &Id| {
+            let board = self.data.board_of_column(*column);
+            board.is_some() && board == self.current_board
         };
         self.selection = self.selection.and_then(|s| match s.card {
-            Some(card) => board
-                .columns
-                .iter()
-                .find(|c| c.cards.iter().any(|x| x.id == card))
-                .map(|c| Selection {
-                    column: c.id,
+            Some(card) => self
+                .data
+                .column_of_card(card)
+                .filter(here)
+                .map(|column| Selection {
+                    column,
                     card: Some(card),
                 }),
-            None => board.columns.iter().any(|c| c.id == s.column).then_some(s),
+            None => here(&s.column).then_some(s),
         });
     }
 
@@ -1112,49 +1127,22 @@ impl App {
         self.validate_labels();
         self.validate_filter();
         self.validate_move();
-        let on_board = |card: Id| {
-            self.board().is_some_and(|b| {
-                b.columns
-                    .iter()
-                    .any(|c| c.cards.iter().any(|x| x.id == card))
-            })
-        };
-        self.panel = self.panel.filter(|card| on_board(*card));
+        self.panel = self.panel.filter(|card| self.on_board(*card));
         if self.panel.is_some() {
             self.panel = self.selection.and_then(|s| s.card).or(self.panel);
         }
     }
 
-    pub(crate) fn board_of_card(&self, card: Id) -> Option<Id> {
-        let board = self.data.boards.iter().find(|b| {
-            b.columns
-                .iter()
-                .any(|c| c.cards.iter().any(|x| x.id == card))
-        })?;
-        Some(board.id)
+    /// The Card is an active Card of the current Board.
+    pub(crate) fn on_board(&self, card: Id) -> bool {
+        let board = self.data.board_of_card(card);
+        board.is_some() && board == self.current_board
     }
 
     /// The current Board.
     pub(crate) fn board(&self) -> Option<&Board> {
         let id = self.current_board?;
         self.data.boards.iter().find(|b| b.id == id)
-    }
-
-    fn find_column(&self, column: Id) -> Option<&Column> {
-        self.data
-            .boards
-            .iter()
-            .flat_map(|b| &b.columns)
-            .find(|c| c.id == column)
-    }
-
-    pub(crate) fn board_of_column(&self, column: Id) -> Option<Id> {
-        let board = self
-            .data
-            .boards
-            .iter()
-            .find(|b| b.columns.iter().any(|c| c.id == column))?;
-        Some(board.id)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -1232,7 +1220,6 @@ impl App {
                 .on_input(Message::EditChanged)
                 .on_submit(Message::CommitEdit)
                 .into(),
-            // One line, clipped (iced has no ellipsis), full name in a tooltip.
             _ => {
                 let label = mouse_area(text(name).size(size).wrapping(text::Wrapping::None))
                     .on_double_click(Message::StartEdit(field));
@@ -1242,24 +1229,17 @@ impl App {
                         .on_release(Message::DragEnd),
                     None => label,
                 };
-                let full = container(text(name))
-                    .padding(4)
-                    .style(container::rounded_box);
-                container(tooltip(label, full, tooltip::Position::Bottom))
-                    .width(Fill)
-                    .clip(true)
-                    .into()
+                // The open Card's title names its shortcut too.
+                let hint =
+                    matches!(field, Field::CardTitle(_)).then(|| text("Rename (F2)").size(12));
+                let full = column![text(name)].extend(hint.map(Into::into));
+                clipped(label, full).width(Fill).into()
             }
         }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let content = match self
-            .data
-            .boards
-            .iter()
-            .find(|b| Some(b.id) == self.current_board)
-        {
+        let content = match self.board() {
             Some(board) if self.archive == Some(board.id) => self.view_archive(board),
             Some(board) => self.view_board(board),
             None => self.view_empty(),
@@ -1304,14 +1284,12 @@ impl App {
         if let Some(notice) = self.view_notice() {
             return stack![content, notice].into();
         }
-        match self.closing {
-            Closing::Asking | Closing::Waiting if self.not_saved.is_some() => {
-                stack![content, self.view_close_dialog()].into()
-            }
-            _ => match &self.confirm {
-                Some(confirm) => stack![content, view_confirm(confirm)].into(),
-                None => content,
-            },
+        if self.closing_dialog() {
+            return stack![content, self.view_close_dialog()].into();
+        }
+        match &self.confirm {
+            Some(confirm) => stack![content, view_confirm(confirm)].into(),
+            None => content,
         }
     }
 
@@ -1482,7 +1460,7 @@ impl App {
                     button("Set limit…")
                         .style(button::secondary)
                         .on_press(Message::OpenLimit(col.id)),
-                    button(text(crate::archive::remove_label(col)))
+                    button(text(crate::archive::remove_column_text(col)))
                         .style(button::secondary)
                         .on_press(Message::RemoveColumn(col.id)),
                 ]
@@ -1517,16 +1495,9 @@ impl App {
 
     fn view_empty(&self) -> Element<'_, Message> {
         let content: Element<_> = match &self.board_name {
-            Some(name) => column![
-                text("Name your Board"),
-                text_input("Board name", name)
-                    .id(BOARD_NAME_INPUT)
-                    .on_input(Message::BoardNameChanged)
-                    .on_submit(Message::CreateBoard)
-                    .width(280),
-            ]
-            .spacing(8)
-            .into(),
+            Some(name) => column![text("Name your Board"), board_name_input(name).width(280)]
+                .spacing(8)
+                .into(),
             None if self.data.boards.is_empty() => button("Create your first Board")
                 .on_press(Message::NewBoard)
                 .into(),
@@ -1581,14 +1552,42 @@ fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
     )
 }
 
-/// Whether two saved states match, ignoring the window: geometry never triggers a save on its own.
-fn same(a: &(Data, Settings), b: &(Data, Settings)) -> bool {
-    let bare = |s: &Settings| Settings {
-        window: None,
-        maximized: false,
-        ..s.clone()
-    };
-    a.0 == b.0 && bare(&a.1) == bare(&b.1)
+/// One line, clipped (iced has no ellipsis), with `full` in a tooltip below it.
+pub(crate) fn clipped<'a>(
+    line: impl Into<Element<'a, Message>>,
+    full: impl Into<Element<'a, Message>>,
+) -> container::Container<'a, Message> {
+    let full = container(full).padding(4).style(container::rounded_box);
+    container(tooltip(line, full, tooltip::Position::Bottom)).clip(true)
+}
+
+/// [`clipped`] for plain text, the full text in the tooltip.
+pub(crate) fn clipped_text<'a>(
+    s: impl text::IntoFragment<'a> + Clone,
+) -> container::Container<'a, Message> {
+    clipped(text(s.clone()).wrapping(text::Wrapping::None), text(s))
+}
+
+/// The new-Board name prompt's text box.
+pub(crate) fn board_name_input(name: &str) -> widget::TextInput<'_, Message> {
+    text_input("Board name", name)
+        .id(BOARD_NAME_INPUT)
+        .on_input(Message::BoardNameChanged)
+        .on_submit(Message::CreateBoard)
+}
+
+/// A dialog's title row with its ✕ (Esc) button sending `close`.
+pub(crate) fn dialog_header(title: &str, close: Message) -> Element<'_, Message> {
+    row![
+        text(title).size(20),
+        iced::widget::space::horizontal(),
+        crate::chrome::tip(
+            button("✕").style(button::text).on_press(close),
+            "Close (Esc)"
+        ),
+    ]
+    .align_y(Center)
+    .into()
 }
 
 /// An overlay panel over the dimmed app, blocking clicks to what is below.
@@ -1706,10 +1705,7 @@ fn moved(
     let Some(selection) = selection else {
         return board.columns.first().map(|c| at(c, Some(0)));
     };
-    let ci = board
-        .columns
-        .iter()
-        .position(|c| c.id == selection.column)?;
+    let (ci, _) = position(board, selection)?;
     let column = &board.columns[ci];
     let cards = visible(column);
     let index = selection
@@ -1779,9 +1775,11 @@ impl App {
             settings,
             repaired,
         } = storage::open(&dir)?.unwrap_or_default();
-        let ids: Vec<Id> = data.boards.iter().map(|b| b.id).collect();
-        let last = settings.last_board.or(ids.first().copied());
-        let current_board = data.fallback(last, &ids);
+        // The last open Board, else (archived, gone or unset) the first active one.
+        let last = settings
+            .last_board
+            .filter(|b| data.active_board(*b).is_some());
+        let current_board = last.or(data.boards.iter().find(|b| !b.archived).map(|b| b.id));
         Ok(App {
             sidebar_collapsed: settings.sidebar_collapsed,
             dark: settings.dark,
@@ -1810,11 +1808,11 @@ impl App {
             return None; // live text waits for the idle write (`EditTick`)
         }
         let state = (self.data.clone(), self.settings());
-        if same(&state, &self.saved) {
+        if self.same(&state, &self.saved) {
             self.not_saved = None; // e.g. undone back to what the file holds
             return None;
         }
-        if self.failed.as_ref().is_some_and(|f| same(f, &state)) {
+        if self.failed.as_ref().is_some_and(|f| self.same(f, &state)) {
             return None; // wait for a change or the retry timer
         }
         // ponytail: rotation runs here on the UI thread (a file copy, at most once per session or
@@ -1835,12 +1833,26 @@ impl App {
     /// Exits once a requested close has nothing left to save and no save in flight;
     /// otherwise the next `save_if_changed` starts the save and its `Saved` comes back here.
     fn exit_if_saved(&mut self) -> Task<Message> {
-        let clean = same(&self.saved, &(self.data.clone(), self.settings()));
+        let clean = self.same(&self.saved, &(self.data.clone(), self.settings()));
         if self.closing != Closing::Waiting || self.writing.is_some() || !clean {
             return Task::none();
         }
         self.closing = Closing::Exiting;
         iced::exit()
+    }
+
+    /// Whether two saved states match. The window is ignored (geometry never triggers a save on
+    /// its own) except while closing, when it is saved too.
+    fn same(&self, a: &(Data, Settings), b: &(Data, Settings)) -> bool {
+        if self.closing != Closing::No {
+            return a == b;
+        }
+        let bare = |s: &Settings| Settings {
+            window: None,
+            maximized: false,
+            ..s.clone()
+        };
+        a.0 == b.0 && bare(&a.1) == bare(&b.1)
     }
 
     /// The settings saved beside the Boards.

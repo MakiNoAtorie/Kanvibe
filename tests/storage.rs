@@ -293,6 +293,57 @@ fn newer_version_is_refused_and_the_file_left_alone() {
 }
 
 #[test]
+fn newer_version_leaves_a_leftover_tmp_alone() {
+    let (_tmp, dir) = data_dir();
+    fs::write(
+        dir.join("kanvibe.json"),
+        r#"{ "version": 2, "next_id": 1 }"#,
+    )
+    .unwrap();
+    fs::write(dir.join("kanvibe.json.tmp"), "half a save").unwrap();
+
+    assert!(matches!(storage::load(&dir), Err(LoadError::Newer)));
+    assert_eq!(
+        fs::read_to_string(dir.join("kanvibe.json.tmp")).unwrap(),
+        "half a save"
+    );
+}
+
+#[test]
+fn settings_are_written_as_theme_and_one_window_object() {
+    let (_tmp, dir) = data_dir();
+    let settings = Settings {
+        dark: true,
+        window: Some(storage::Geometry {
+            x: 10.0,
+            y: 20.0,
+            width: 1000.0,
+            height: 700.0,
+        }),
+        maximized: true,
+        ..Settings::default()
+    };
+
+    storage::save(&dir, &Data::default(), &settings).unwrap();
+
+    let text = fs::read_to_string(dir.join("kanvibe.json")).unwrap();
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(file["settings"]["theme"], "dark", "{text}");
+    assert_eq!(
+        file["settings"]["window"],
+        serde_json::json!({ "x": 10.0, "y": 20.0, "w": 1000.0, "h": 700.0, "maximized": true }),
+        "{text}"
+    );
+    assert_eq!(storage::load(&dir).unwrap().unwrap().1, settings);
+
+    storage::save(&dir, &Data::default(), &Settings::default()).unwrap();
+    let text = fs::read_to_string(dir.join("kanvibe.json")).unwrap();
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(file["settings"]["theme"], "light", "{text}");
+    assert_eq!(storage::load(&dir).unwrap().unwrap().1, Settings::default());
+}
+
+#[test]
 fn content_errors_are_unreadable() {
     let (_tmp, dir) = data_dir();
     for json in [

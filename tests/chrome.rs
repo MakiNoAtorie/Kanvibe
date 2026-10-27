@@ -188,6 +188,21 @@ const MONITOR: Geometry = Geometry {
 };
 
 #[test]
+fn closing_saves_a_window_only_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = app_in(tmp.path());
+    place(&mut app, geometry(40.0, 50.0, 1000.0, 700.0), false);
+    send(&mut app, [Message::Maximized(true)]);
+
+    send(&mut app, [Message::CloseRequested]);
+
+    assert_eq!(app.closing, kanvibe::app::Closing::Exiting);
+    let settings = saved_settings(tmp.path());
+    assert_eq!(settings.window, Some(geometry(40.0, 50.0, 1000.0, 700.0)));
+    assert!(settings.maximized);
+}
+
+#[test]
 fn on_screen_rectangle_is_restored() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = app_in(tmp.path());

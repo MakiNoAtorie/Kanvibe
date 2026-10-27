@@ -35,14 +35,19 @@ impl History {
         }
     }
 
-    /// Records a step if `boards` differ from the last recorded state.
-    pub fn record(&mut self, boards: &[Board], show_undo: Option<Id>, show_redo: Option<Id>) {
+    /// Records a step if `boards` differ from the last recorded state; `true` when it did.
+    pub fn record(
+        &mut self,
+        boards: &[Board],
+        show_undo: Option<Id>,
+        show_redo: Option<Id>,
+    ) -> bool {
         let present = self.present.take().unwrap_or_default();
         let next = share(boards, &present);
         if next.len() == present.len() && next.iter().zip(&present).all(|(a, b)| Arc::ptr_eq(a, b))
         {
             self.present = Some(present);
-            return;
+            return false;
         }
         self.undo.push(Step {
             boards: present,
@@ -54,6 +59,7 @@ impl History {
         }
         self.redo.clear();
         self.present = Some(next);
+        true
     }
 
     /// Steps back: returns the Boards to restore and the Board to show, if any.

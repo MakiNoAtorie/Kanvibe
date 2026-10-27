@@ -61,12 +61,7 @@ impl App {
     pub(crate) fn update_filter(&mut self, message: Message) -> Task<Message> {
         if message == Message::LeaveField {
             // Every other text box keeps state that tells it was the one focused.
-            let field_open = self.board_name.is_some()
-                || self.capture.is_some()
-                || self.editing.is_some()
-                || self.limit_input.is_some()
-                || self.label_picker.is_some()
-                || self.shortcuts;
+            let field_open = self.field_open() || self.label_picker.is_some() || self.shortcuts;
             return match field_open {
                 true => self.update(Message::Escape),
                 false => Task::none(), // the filter box: it has already unfocused
@@ -127,13 +122,14 @@ impl App {
             0 => "Labels".to_string(),
             n => format!("Labels ({n})"),
         };
-        row![
+        row![crate::chrome::tip(
             text_input("Filter (Ctrl+F)", &self.filter.text)
                 .id(INPUT)
                 .width(220)
                 .on_input(Message::FilterChanged)
-                .on_submit(Message::SubmitFilter)
-        ]
+                .on_submit(Message::SubmitFilter),
+            "Filter (Ctrl+F)"
+        )]
         .extend(clear)
         .push(
             button(text(labels))

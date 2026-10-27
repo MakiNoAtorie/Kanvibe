@@ -4,8 +4,8 @@ use iced::widget::{
 };
 use iced::{Border, Center, Color, Element, Fill, Task};
 
-use crate::app::{App, Confirm, EDIT_INPUT, Field, Message, dialog};
-use crate::domain::{Board, Card, Data, Id, Label, now};
+use crate::app::{App, Confirm, EDIT_INPUT, Field, Message, dialog, dialog_header};
+use crate::domain::{Board, Card, Data, Id, Label, cards, now};
 
 /// The Label palette: stable keys (what files store) and colours that read in light and dark
 /// themes (white text on a mid-dark fill). Reorder freely; files hold keys, not indexes.
@@ -48,8 +48,7 @@ pub fn chip_text(name: &str) -> String {
 pub fn delete_prompt(data: &Data, label: Id) -> Option<String> {
     let name = &data.label(label)?.name;
     let n = data.label_use(label);
-    let cards = if n == 1 { "Card" } else { "Cards" };
-    (n > 0).then(|| format!("Delete Label \"{name}\"? It is on {n} {cards}."))
+    (n > 0).then(|| format!("Delete Label \"{name}\"? It is on {}.", cards(n)))
 }
 
 impl Data {
@@ -117,29 +116,17 @@ impl Data {
 
     /// The Card's Labels in its Board's Label order.
     pub fn card_labels(&self, card: Id) -> Vec<&Label> {
-        let Some(board) = self.boards.iter().find(|b| {
-            b.columns
-                .iter()
-                .any(|c| c.cards.iter().any(|x| x.id == card))
-        }) else {
+        let Some((b, _)) = self.holding(card) else {
             return Vec::new();
         };
-        let card = board
-            .columns
-            .iter()
-            .flat_map(|c| &c.cards)
-            .find(|c| c.id == card);
-        board_labels(board, card)
+        board_labels(&self.boards[b], self.card(card))
     }
 
     /// Attaches the Label to the Card, or detaches it when attached, and touches the Card.
     /// A Label of another Board, or an unknown Card, changes nothing.
     pub fn toggle_label(&mut self, card: Id, label: Id) -> Option<()> {
-        let board = self.boards.iter_mut().find(|b| {
-            b.columns
-                .iter()
-                .any(|c| c.cards.iter().any(|x| x.id == card))
-        })?;
+        let (b, _) = self.holding(card)?;
+        let board = &mut self.boards[b];
         board.labels.iter().find(|l| l.id == label)?;
         let columns = board.columns.iter_mut();
         let card = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card)?;
@@ -222,9 +209,6 @@ impl App {
     pub(crate) fn update_labels(&mut self, message: Message) -> Task<Message> {
         self.commit_pending();
         let card = self.label_picker.as_ref().map(|p| p.card);
-        let record = |app: &mut App, board: Option<Id>| {
-            app.history.record(&app.data.boards, board, board);
-        };
         match message {
             Message::OpenLabels => {
                 if let Some(card) = self.panel {
@@ -240,8 +224,7 @@ impl App {
                 if let Some(card) = card
                     && self.data.toggle_label(card, label).is_some()
                 {
-                    let board = self.board_of_card(card);
-                    record(self, board);
+                    self.record_step(self.data.board_of_card(card));
                 }
             }
             Message::EditLabel(label) => {
@@ -255,8 +238,7 @@ impl App {
             }
             Message::SetLabelColor(label, color) => {
                 if self.data.set_label_color(label, &color).is_some() {
-                    let board = self.data.board_of_label(label);
-                    record(self, board);
+                    self.record_step(self.data.board_of_label(label));
                 }
             }
             Message::DeleteLabel(label) => match delete_prompt(&self.data, label) {
@@ -294,12 +276,12 @@ impl App {
             }
             Message::CreateLabel => {
                 let new = self.label_picker.as_ref().and_then(|p| p.new.clone());
-                let board = card.and_then(|card| self.board_of_card(card));
+                let board = card.and_then(|card| self.data.board_of_card(card));
                 if let Some((new, board)) = new.zip(board)
                     && self.data.add_label(board, &new.text, &new.color).is_some()
                 {
                     self.label_picker.as_mut().expect("open").new = None;
-                    record(self, Some(board));
+                    self.record_step(Some(board));
                 }
             }
             _ => {}
@@ -310,7 +292,7 @@ impl App {
     fn delete_label(&mut self, label: Id) {
         let board = self.data.board_of_label(label);
         if self.data.delete_label(label).is_some() {
-            self.history.record(&self.data.boards, board, board);
+            self.record_step(board);
         }
     }
 
@@ -344,11 +326,14 @@ impl App {
         };
         let shown: Element<_> = chips.unwrap_or_else(|| text("None").size(12).into());
         row![
-            text("Labels (L)").size(12),
-            button(shown)
-                .style(button::text)
-                .padding(2)
-                .on_press(Message::OpenLabels)
+            text("Labels").size(12),
+            crate::chrome::tip(
+                button(shown)
+                    .style(button::text)
+                    .padding(2)
+                    .on_press(Message::OpenLabels),
+                "Labels (L)"
+            )
         ]
         .spacing(8)
         .align_y(Center)
@@ -360,14 +345,7 @@ impl App {
         let Some((board, card)) = self.board().zip(self.data.card(picker.card)) else {
             return space().into();
         };
-        let header = row![
-            text("Labels").size(20),
-            space::horizontal(),
-            button("✕")
-                .style(button::text)
-                .on_press(Message::CloseLabels)
-        ]
-        .align_y(Center);
+        let header = dialog_header("Labels", Message::CloseLabels);
         let rows = self.picker_rows(board, &card.labels, Message::ToggleLabel, Some(picker));
         let list = scrollable(rows).height(Fill);
         let body = column![header, list, self.new_label_form(board, picker)].spacing(12);

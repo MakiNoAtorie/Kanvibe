@@ -599,6 +599,18 @@ fn ctrl_z_during_a_rename_returns_the_name_to_its_starting_value() {
 }
 
 #[test]
+fn ctrl_z_during_an_unchanged_edit_only_closes_the_field() {
+    let mut app = app_with_board();
+    let doing = column_id(&app, 1);
+
+    type_into(&mut app, Field::ColumnName(doing), &["In", "Doing"]);
+    send(&mut app, [ctrl("z", false)]);
+
+    assert_eq!(app.editing, None);
+    assert_eq!(app.data.boards.len(), 1, "creating the Board is not undone");
+}
+
+#[test]
 fn a_blank_name_reverts_and_an_unchanged_one_records_no_step() {
     let mut app = app_with_board();
     let board = app.data.boards[0].id;

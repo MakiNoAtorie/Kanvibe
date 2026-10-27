@@ -189,11 +189,11 @@ fn remove_column_archives_its_cards_as_one_undo_step() {
     let mut app = app_with_cards();
     let todo = column_id(&app, 0);
     assert_eq!(
-        archive::remove_label(&app.data.boards[0].columns[0]),
+        archive::remove_column_text(&app.data.boards[0].columns[0]),
         "Remove Column (archives 3 Cards)"
     );
     assert_eq!(
-        archive::remove_label(&app.data.boards[0].columns[1]),
+        archive::remove_column_text(&app.data.boards[0].columns[1]),
         "Remove Column (archives 0 Cards)"
     );
 

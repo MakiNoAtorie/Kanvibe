@@ -18,6 +18,9 @@ pub struct Board {
     /// Archived Boards sit in the sidebar's "Archived (n)" section and cannot be opened.
     #[serde(default)]
     pub archived: bool,
+    /// When the Board was archived (RFC 3339 UTC); `None` while active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
     #[serde(default)]
     pub columns: Vec<Column>,
     /// Archived Cards, oldest archived first.
@@ -119,6 +122,11 @@ fn archived(mut card: Card, column_id: Id) -> Archived {
     }
 }
 
+/// "1 Card", "n Cards".
+pub fn cards(n: usize) -> String {
+    format!("{n} Card{}", if n == 1 { "" } else { "s" })
+}
+
 /// The current time as an RFC 3339 UTC string with second precision.
 pub fn now() -> String {
     jiff::Timestamp::from_second(jiff::Timestamp::now().as_second())
@@ -151,6 +159,7 @@ impl Data {
             id,
             name: name.into(),
             archived: false,
+            archived_at: None,
             columns,
             archived_cards: Vec::new(),
             labels: Vec::new(),
@@ -167,6 +176,7 @@ impl Data {
     pub fn archive_board(&mut self, id: Id) -> Option<()> {
         let board = self.boards.iter_mut().find(|b| b.id == id && !b.archived)?;
         board.archived = true;
+        board.archived_at = Some(now());
         Some(())
     }
 
@@ -182,6 +192,7 @@ impl Data {
         let at = self.boards.iter().position(|b| b.id == id && b.archived)?;
         let mut board = self.boards.remove(at);
         board.archived = false;
+        board.archived_at = None;
         self.boards.push(board);
         Some(())
     }
@@ -306,10 +317,9 @@ impl Data {
 
     /// Moves a Card to `index` in a Column (clamped to its end). Unknown Card or Column: nothing.
     pub fn move_card(&mut self, card: Id, column: Id, index: usize) {
-        let (Some((fb, fc)), Some((tb, tc))) = (
-            self.column_where(|c| c.cards.iter().any(|x| x.id == card)),
-            self.column_where(|c| c.id == column),
-        ) else {
+        let (Some((fb, fc)), Some((tb, tc))) =
+            (self.holding(card), self.column_where(|c| c.id == column))
+        else {
             return;
         };
         let new_column = (fb, fc) != (tb, tc);
@@ -328,7 +338,7 @@ impl Data {
     /// the target's Label is used (its colour wins), else the source's is appended to the target.
     /// Own or archived Board, unknown Card or Board: nothing.
     pub fn move_to_board(&mut self, card: Id, board: Id) -> Option<()> {
-        let (b, c) = self.column_where(|c| c.cards.iter().any(|x| x.id == card))?;
+        let (b, c) = self.holding(card)?;
         let t = self
             .boards
             .iter()
@@ -376,7 +386,7 @@ impl Data {
 
     /// Sends an active Card to its Board's Archive, remembering its Column.
     pub fn archive_card(&mut self, card: Id) -> Option<()> {
-        let (b, c) = self.column_where(|c| c.cards.iter().any(|x| x.id == card))?;
+        let (b, c) = self.holding(card)?;
         let board = &mut self.boards[b];
         let column = &mut board.columns[c];
         let at = column.cards.iter().position(|x| x.id == card)?;
@@ -445,11 +455,45 @@ impl Data {
     }
 
     /// (Board index, Column index) of the first Column matching `f`.
-    fn column_where(&self, f: impl Fn(&Column) -> bool) -> Option<(usize, usize)> {
+    pub(crate) fn column_where(&self, f: impl Fn(&Column) -> bool) -> Option<(usize, usize)> {
         self.boards
             .iter()
             .enumerate()
             .find_map(|(b, board)| Some((b, board.columns.iter().position(&f)?)))
+    }
+
+    /// (Board index, Column index) of the Column holding this active Card.
+    pub(crate) fn holding(&self, card: Id) -> Option<(usize, usize)> {
+        self.column_where(|c| c.cards.iter().any(|x| x.id == card))
+    }
+
+    /// The Board holding this active Card.
+    pub fn board_of_card(&self, card: Id) -> Option<Id> {
+        self.holding(card).map(|(b, _)| self.boards[b].id)
+    }
+
+    /// The Column holding this active Card.
+    pub fn column_of_card(&self, card: Id) -> Option<Id> {
+        self.holding(card)
+            .map(|(b, c)| self.boards[b].columns[c].id)
+    }
+
+    /// The Board whose Archive holds this Card.
+    pub fn board_of_archived(&self, card: Id) -> Option<Id> {
+        let has = |b: &&Board| b.archived_cards.iter().any(|a| a.card.id == card);
+        Some(self.boards.iter().find(has)?.id)
+    }
+
+    /// The Column with this ID.
+    pub fn column(&self, id: Id) -> Option<&Column> {
+        let (b, c) = self.column_where(|c| c.id == id)?;
+        Some(&self.boards[b].columns[c])
+    }
+
+    /// The Board holding this Column.
+    pub fn board_of_column(&self, column: Id) -> Option<Id> {
+        let (b, _) = self.column_where(|c| c.id == column)?;
+        Some(self.boards[b].id)
     }
 
     /// The Card with this ID.

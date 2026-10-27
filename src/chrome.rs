@@ -201,7 +201,7 @@ pub fn tip<'a>(content: impl Into<Element<'a, Message>>, label: &'a str) -> Elem
     .into()
 }
 
-/// The sidebar footer's three buttons.
+/// The sidebar footer's last three buttons: theme, Keyboard shortcuts, Open data folder.
 pub fn footer(app: &App) -> Element<'_, Message> {
     let link = |label, message| {
         button(text(label).size(13))
@@ -216,12 +216,12 @@ pub fn footer(app: &App) -> Element<'_, Message> {
     column![
         tip(link(theme, Message::ToggleTheme), switch),
         tip(
-            link("Open data folder", Message::OpenDataFolder),
-            "Show the data folder in the file manager"
-        ),
-        tip(
             link("Keyboard shortcuts", Message::ShowShortcuts),
             "Keyboard shortcuts (F1)"
+        ),
+        tip(
+            link("Open data folder", Message::OpenDataFolder),
+            "Show the data folder in the file manager"
         ),
     ]
     .into()

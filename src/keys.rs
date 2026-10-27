@@ -53,6 +53,7 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         (false, Some('n')) if !typing && !modifiers.alt() => return Some(Message::NewCard),
         (false, Some('e')) if !typing && !modifiers.alt() => return Some(Message::EditDescription),
         (false, Some('m')) if !typing && !modifiers.alt() => return Some(Message::OpenMove),
+        (false, Some('l')) if !typing && !modifiers.alt() => return Some(Message::OpenLabels),
         _ => {}
     }
     if *key == Key::Named(Named::F1) {
@@ -75,9 +76,6 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         Key::Named(Named::Enter) if !ctrl => return Some(Message::OpenPanel),
         Key::Named(Named::F2) => return Some(Message::EditTitle),
         Key::Named(Named::Delete) => return Some(Message::ArchiveSelected),
-        Key::Character(c) if !ctrl && !modifiers.alt() && c.eq_ignore_ascii_case("l") => {
-            return Some(Message::OpenLabels);
-        }
         _ => {}
     }
     let direction = match key {

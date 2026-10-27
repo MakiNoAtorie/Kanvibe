@@ -7,8 +7,18 @@ use serde::{Deserialize, Deserializer};
 use crate::domain::{Board, Card, Data, Id};
 use crate::labels::PALETTE;
 
-/// The Data with every repair applied, and whether anything changed.
+/// The Data with every repair applied, and whether anything changed. Trimming outer
+/// whitespace alone doesn't count: a stray space is no reason to stop backup rotation.
 pub fn repair(mut data: Data) -> (Data, bool) {
+    for board in &mut data.boards {
+        trim(&mut board.name);
+        board.labels.iter_mut().for_each(|l| trim(&mut l.name));
+        board.columns.iter_mut().for_each(|c| trim(&mut c.name));
+        for card in cards(board) {
+            trim(&mut card.title);
+            card.checklist.iter_mut().for_each(|i| trim(&mut i.text));
+        }
+    }
     let before = data.clone();
     let mut next = data.next_id;
     each_id(&mut data.boards, &mut |id| next = next.max(*id));
@@ -38,20 +48,22 @@ pub fn repair(mut data: Data) -> (Data, bool) {
         for card in cards(board) {
             name(&mut card.title, "Untitled");
             card.labels.retain(|id| labels.contains(id));
-            card.checklist.retain(|i| !i.text.trim().is_empty());
-            for item in &mut card.checklist {
-                item.text = item.text.trim().into();
-            }
+            card.checklist.retain(|i| !i.text.is_empty());
         }
     }
     let repaired = data != before;
     (data, repaired)
 }
 
-/// Trims a name; a blank one becomes `default`.
+fn trim(s: &mut String) {
+    *s = s.trim().into();
+}
+
+/// A blank (already trimmed) name becomes `default`.
 fn name(name: &mut String, default: &str) {
-    let trimmed = name.trim();
-    *name = if trimmed.is_empty() { default } else { trimmed }.into();
+    if name.is_empty() {
+        *name = default.into();
+    }
 }
 
 /// Reads a Column Limit leniently: any integer below 1 reads as 0, which `repair` clears.

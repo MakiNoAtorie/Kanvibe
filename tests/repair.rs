@@ -145,6 +145,23 @@ fn blank_checklist_items_are_removed_and_the_rest_trimmed() {
 }
 
 #[test]
+fn trimming_whitespace_alone_is_not_a_repair_so_backups_still_rotate() {
+    let (_tmp, dir) = write(
+        r#"{ "version": 1, "next_id": 4, "boards": [ { "id": 1, "name": " Work ", "columns": [
+            { "id": 2, "name": "To do ", "cards": [ { "id": 3, "title": " A",
+              "checklist": [ { "id": 4, "text": " step " } ] } ] } ] } ] }"#,
+    );
+    let app = opened(Screen::open(dir));
+    assert_eq!(app.rotation, Rotation::Due);
+    let card = &app.data.boards[0].columns[0].cards[0];
+    assert_eq!(app.data.boards[0].name, "Work");
+    assert_eq!(
+        (card.title.as_str(), card.checklist[0].text.as_str()),
+        ("A", "step")
+    );
+}
+
+#[test]
 fn an_older_version_is_migrated_and_its_original_kept_as_a_versioned_copy() {
     let json = r#"{ "version": 0, "next_id": 1, "boards": [ { "id": 1, "name": "Work" } ] }"#;
     let (_tmp, dir) = write(json);
@@ -171,8 +188,8 @@ fn an_older_version_is_migrated_and_its_original_kept_as_a_versioned_copy() {
 
 #[test]
 fn last_board_is_ignored_unless_it_names_an_active_board() {
-    // Archived: the next active Board below it (as after archiving); unknown: the first.
-    for (last, current) in [(2, 3), (99, 1)] {
+    // Archived or unknown: the first active Board.
+    for (last, current) in [(2, 1), (99, 1)] {
         let (_tmp, dir) = write(&format!(
             r#"{{ "version": 1, "next_id": 3, "settings": {{ "last_board": {last} }}, "boards": [
                 {{ "id": 1, "name": "Work" }}, {{ "id": 2, "name": "Old", "archived": true }},

@@ -1,10 +1,8 @@
 //! The left sidebar: active Boards, the collapsed "Archived (n)" section and the footer.
-use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, space, text, text_input, tooltip,
-};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
 use iced::{Border, Center, Color, Element, Fill, Theme};
 
-use crate::app::{App, BOARD_NAME_INPUT, Message};
+use crate::app::{App, Message, board_name_input, clipped_text};
 use crate::domain::{Board, Id};
 use crate::drag::{self, Drag, Item, Target};
 
@@ -55,7 +53,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .on_press(Message::ToggleArchivedBoards);
         let rows = archived.iter().filter(|_| app.archived_open).map(|b| {
             row![
-                clipped(&b.name),
+                clipped_text(b.name.as_str()).width(Fill),
                 small("Restore", Message::RestoreBoard(b.id)),
                 small("Delete", Message::AskDeleteBoard(b.id)),
             ]
@@ -67,11 +65,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     });
     // On the "No open Boards" screen the name prompt sits in the middle instead.
     let footer: Element<_> = match &app.board_name {
-        Some(name) if app.current_board.is_some() => text_input("Board name", name)
-            .id(BOARD_NAME_INPUT)
-            .on_input(Message::BoardNameChanged)
-            .on_submit(Message::CreateBoard)
-            .into(),
+        Some(name) if app.current_board.is_some() => board_name_input(name).into(),
         _ => button("+ New Board")
             .style(button::text)
             .on_press(Message::NewBoard)
@@ -121,7 +115,7 @@ pub fn board_row(board: &Board, current: bool) -> Element<'_, Message> {
     };
     // No `on_press`: the button must not capture the press the drag source needs. A press
     // released under the drag threshold opens the Board (see `Message::DragEnd`).
-    let row = button(clipped(&board.name))
+    let row = button(clipped_text(board.name.as_str()).width(Fill))
         .style(move |theme, status| match status {
             button::Status::Disabled => style(theme, button::Status::Active),
             status => style(theme, status),
@@ -147,19 +141,6 @@ fn drop_row<'a>(row: Element<'a, Message>, board: Id, drag: &Drag) -> Element<'a
         ..Default::default()
     });
     drag::target(mouse_area(outlined), target, true).into()
-}
-
-/// One line, clipped, with the full name in a tooltip.
-fn clipped(name: &str) -> Element<'_, Message> {
-    let full = container(text(name))
-        .padding(4)
-        .style(container::rounded_box);
-    let label = tooltip(
-        text(name).wrapping(text::Wrapping::None),
-        full,
-        tooltip::Position::Bottom,
-    );
-    container(label).width(Fill).clip(true).into()
 }
 
 fn small(label: &str, message: Message) -> Element<'_, Message> {

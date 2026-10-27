@@ -182,7 +182,7 @@ impl App {
                     self.drag = None;
                     let id = self.data.import_board(board);
                     self.current_board = Some(id);
-                    self.history.record(&self.data.boards, None, None);
+                    self.record_step(None);
                 }
                 Err(refusal) => self.notice = Some(refusal),
             },
@@ -199,8 +199,13 @@ impl App {
     }
 }
 
-/// The suggested export file name: the Board name made safe for Windows, plus `.kanvibe.json`.
+/// The suggested export file name: [`stem`] plus `.kanvibe.json`.
 pub fn file_name(board_name: &str) -> String {
+    format!("{}.kanvibe.json", stem(board_name))
+}
+
+/// The Board name made safe as a Windows file name stem; "Board" when nothing is left.
+pub fn stem(board_name: &str) -> String {
     let trim = |s: &str| s.trim_end_matches(['.', ' ']).to_string();
     let safe: String = board_name
         .chars()
@@ -217,10 +222,9 @@ pub fn file_name(board_name: &str) -> String {
         || (stem.len() == 4
             && (stem.starts_with("COM") || stem.starts_with("LPT"))
             && matches!(stem.as_bytes()[3], b'1'..=b'9'));
-    let name = match safe.as_str() {
+    match safe.as_str() {
         "" => "Board".into(),
         _ if reserved => format!("_{safe}"),
         _ => safe,
-    };
-    format!("{name}.kanvibe.json")
+    }
 }

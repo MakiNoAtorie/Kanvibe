@@ -231,11 +231,11 @@ fn collapsed_sidebar_and_last_board_persist_across_restarts() {
 }
 
 #[test]
-fn reopening_with_an_archived_last_board_opens_the_next_below() {
+fn reopening_with_an_archived_last_board_opens_the_first_active_board() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("data");
     let mut app = App::open(dir.clone()).unwrap();
-    let [_, b, c] = ["A", "B", "C"].map(|name| create_board(&mut app, name));
+    let [a, b, _] = ["A", "B", "C"].map(|name| create_board(&mut app, name));
     send_saving(&mut app, [Message::OpenBoard(b), Message::ArchiveBoard(b)]);
     // Simulate a last_board that points at an archived Board.
     let mut settings = app.saved.1.clone();
@@ -244,7 +244,52 @@ fn reopening_with_an_archived_last_board_opens_the_next_below() {
 
     let app = App::open(dir).unwrap();
 
-    assert_eq!(app.current_board, Some(c));
+    assert_eq!(app.current_board, Some(a));
+}
+
+#[test]
+fn the_delete_prompt_counts_active_and_archived_cards_together() {
+    let (mut app, [a, ..]) = app_with_boards();
+    let todo = app.data.boards[0].columns[0].id;
+    send(&mut app, [Message::OpenCapture(todo)]);
+    for title in ["one", "two"] {
+        send(
+            &mut app,
+            [
+                Message::CaptureChanged(title.into()),
+                Message::SubmitCapture,
+            ],
+        );
+    }
+    let one = app.data.boards[0].columns[0].cards[0].id;
+    send(
+        &mut app,
+        [
+            Message::Escape,
+            Message::ArchiveCard(one),
+            Message::ArchiveBoard(a),
+            Message::AskDeleteBoard(a),
+        ],
+    );
+
+    assert_eq!(
+        app.confirm.as_ref().unwrap().prompt,
+        "Permanently delete Board \"A\" with 2 Cards (1 archived)? \
+         You can undo this until Kanvibe closes."
+    );
+}
+
+#[test]
+fn archiving_a_board_stamps_archived_at_and_restoring_clears_it() {
+    let (mut app, [a, ..]) = app_with_boards();
+
+    send(&mut app, [Message::ArchiveBoard(a)]);
+    let stamp = app.data.boards[0].archived_at.clone().expect("stamped");
+    assert!(stamp.parse::<jiff::Timestamp>().is_ok(), "{stamp}");
+
+    send(&mut app, [Message::RestoreBoard(a)]);
+    let restored = app.data.boards.iter().find(|b| b.id == a).unwrap();
+    assert_eq!(restored.archived_at, None);
 }
 
 #[test]

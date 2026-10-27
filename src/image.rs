@@ -134,8 +134,7 @@ impl App {
                 }
                 self.saving_image = true;
                 let (filter, theme) = (self.filter.clone(), self.theme());
-                let json = crate::transfer::file_name(&board.name);
-                let stem = json.strip_suffix(".kanvibe.json").unwrap_or(&json);
+                let stem = crate::transfer::stem(&board.name);
                 let pick = rfd::AsyncFileDialog::new()
                     .set_file_name(format!("{stem}.png"))
                     .add_filter("PNG image", &["png"])

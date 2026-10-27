@@ -16,19 +16,86 @@ const VERSION: u32 = 1;
 /// `.bak1` older than this is refreshed before any save.
 const STALE: Duration = Duration::from_secs(24 * 3600);
 
-/// App settings saved beside the Boards. Missing fields take defaults.
+/// App settings saved beside the Boards. Missing fields take defaults. In the file (see
+/// `SettingsFile`) the theme is `"theme": "light" | "dark"` and the window one object.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "SettingsFile", into = "SettingsFile")]
 pub struct Settings {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_board: Option<Id>,
     pub sidebar_collapsed: bool,
     /// The dark theme; light by default.
     pub dark: bool,
     /// The window's restored (neither minimised nor maximised) rectangle, in logical pixels.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<Geometry>,
     pub maximized: bool,
+}
+
+/// `Settings` as written: `"window": { x, y, w, h, "maximized" }`.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct SettingsFile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_board: Option<Id>,
+    sidebar_collapsed: bool,
+    /// "dark", else light.
+    theme: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    window: Option<WindowFile>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct WindowFile {
+    /// Missing while no restored rectangle is known.
+    #[serde(flatten)]
+    rect: Option<Rect>,
+    #[serde(default)]
+    maximized: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Rect {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+impl From<SettingsFile> for Settings {
+    fn from(f: SettingsFile) -> Self {
+        let window = f.window.unwrap_or_default();
+        Settings {
+            last_board: f.last_board,
+            sidebar_collapsed: f.sidebar_collapsed,
+            dark: f.theme == "dark",
+            window: window.rect.map(|r| Geometry {
+                x: r.x,
+                y: r.y,
+                width: r.w,
+                height: r.h,
+            }),
+            maximized: window.maximized,
+        }
+    }
+}
+
+impl From<Settings> for SettingsFile {
+    fn from(s: Settings) -> Self {
+        let rect = s.window.map(|g| Rect {
+            x: g.x,
+            y: g.y,
+            w: g.width,
+            h: g.height,
+        });
+        SettingsFile {
+            last_board: s.last_board,
+            sidebar_collapsed: s.sidebar_collapsed,
+            theme: if s.dark { "dark" } else { "light" }.into(),
+            window: (rect.is_some() || s.maximized).then_some(WindowFile {
+                rect,
+                maximized: s.maximized,
+            }),
+        }
+    }
 }
 
 /// A window or monitor rectangle in logical pixels.
@@ -221,10 +288,16 @@ pub fn load(dir: &Path) -> Result<Option<(Data, Settings)>, LoadError> {
     Ok(open(dir)?.map(|l| (l.data, l.settings)))
 }
 
-/// Reads the data file, first deleting any leftover `.tmp` from an interrupted save.
-/// `Ok(None)` when there is no data file and no backup: first run.
-/// I/O errors are retried 5 times over 1 s.
+/// Reads the data file. `Ok(None)` when there is no data file and no backup: first run.
+/// I/O errors are retried 5 times over 1 s. A leftover `.tmp` from an interrupted save is
+/// deleted only once the file loads (or on first run); a newer or bad file touches nothing.
 pub fn open(dir: &Path) -> Result<Option<Loaded>, LoadError> {
+    let loaded = load_file(dir)?;
+    remove_if_exists(&dir.join(TMP)).map_err(LoadError::Io)?;
+    Ok(loaded)
+}
+
+fn load_file(dir: &Path) -> Result<Option<Loaded>, LoadError> {
     let mut attempt = 0;
     let bytes = loop {
         match read(dir) {
@@ -312,10 +385,6 @@ fn move_aside(dir: &Path) -> io::Result<()> {
 
 /// The data file's bytes; `None` when it doesn't exist.
 fn read(dir: &Path) -> io::Result<Option<Vec<u8>>> {
-    match fs::remove_file(dir.join(TMP)) {
-        Err(e) if e.kind() != ErrorKind::NotFound => return Err(e),
-        _ => {}
-    }
     match fs::read(dir.join(FILE)) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
