@@ -547,3 +547,18 @@ fn a_label_created_in_the_picker_goes_on_its_card_in_the_same_undo_step() {
     assert!(names(&app).is_empty());
     assert!(on_card(&app, "A").is_empty());
 }
+
+#[test]
+fn a_card_without_labels_offers_to_add_one_in_the_panel() {
+    let mut app = app_with_cards();
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("+ Add Label").is_ok());
+    assert!(ui.find("None").is_err());
+    drop(ui);
+    new_label(&mut app, "Bug");
+    assert!(
+        iced_test::simulator(app.view())
+            .find("+ Add Label")
+            .is_err()
+    );
+}

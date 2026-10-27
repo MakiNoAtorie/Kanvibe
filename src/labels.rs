@@ -329,7 +329,7 @@ impl App {
             Some(board) => chips(board, card),
             None => None,
         };
-        let shown: Element<_> = chips.unwrap_or_else(|| text("None").size(12).into());
+        let shown: Element<_> = chips.unwrap_or_else(|| text("+ Add Label").size(12).into());
         row![
             text("Labels").size(12),
             crate::chrome::tip(
