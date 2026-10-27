@@ -33,19 +33,29 @@ pub fn edge_speed(at: f32, start: f32, len: f32) -> f32 {
     }
 }
 
-/// What is being dragged. Columns and Boards get variants with their tickets.
+/// What is being dragged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     Card(Id),
+    /// A Column, dragged by its header.
+    Column(Id),
+    /// A sidebar Board.
+    Board(Id),
 }
 
-/// A drop target under the cursor. Column gaps and sidebar Boards get variants with their tickets.
+/// A drop target under the cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     /// The Card slot before the Card now at `index` in `column`.
     Card { column: Id, index: usize },
     /// A Column's body outside its Cards: the slot after its last Card.
     Column(Id),
+    /// The gap before the current Board's Column at `.0` (`len` = after the last).
+    ColumnGap(usize),
+    /// The gap before the active Board at `.0` in the sidebar (`len` = after the last).
+    BoardGap(usize),
+    /// A sidebar Board row other than the current one: moves the Card to that Board.
+    Board(Id),
 }
 
 /// A press on an item: a drag once the cursor has moved [`THRESHOLD`] px.
@@ -153,6 +163,16 @@ pub fn indicator<'a>(active: bool) -> Element<'a, Message> {
             ..Default::default()
         })
         .into()
+}
+
+/// The 2px vertical drop indicator, centred in a 12px-wide gap between Columns.
+pub fn indicator_v<'a>(active: bool) -> Element<'a, Message> {
+    let line =
+        container(space().width(2).height(Fill)).style(move |theme: &Theme| container::Style {
+            background: active.then(|| theme.palette().primary.into()),
+            ..Default::default()
+        });
+    container(line).width(12).height(Fill).center_x(12).into()
 }
 
 /// The floating copy of the dragged item under the cursor; it sets no mouse interaction,

@@ -207,10 +207,24 @@ pub fn file_path(dir: &Path) -> PathBuf {
     dir.join(FILE)
 }
 
+/// The data file as loaded: repaired (see `repair::repair`) and migrated to this version.
+#[derive(Debug, Default)]
+pub struct Loaded {
+    pub data: Data,
+    pub settings: Settings,
+    /// Something was repaired: the file didn't load cleanly, so backups must not rotate.
+    pub repaired: bool,
+}
+
+/// `open` without the repaired flag.
+pub fn load(dir: &Path) -> Result<Option<(Data, Settings)>, LoadError> {
+    Ok(open(dir)?.map(|l| (l.data, l.settings)))
+}
+
 /// Reads the data file, first deleting any leftover `.tmp` from an interrupted save.
 /// `Ok(None)` when there is no data file and no backup: first run.
 /// I/O errors are retried 5 times over 1 s.
-pub fn load(dir: &Path) -> Result<Option<(Data, Settings)>, LoadError> {
+pub fn open(dir: &Path) -> Result<Option<Loaded>, LoadError> {
     let mut attempt = 0;
     let bytes = loop {
         match read(dir) {
@@ -222,12 +236,34 @@ pub fn load(dir: &Path) -> Result<Option<(Data, Settings)>, LoadError> {
         }
     };
     match bytes {
-        Some(bytes) => parse(&bytes).map(Some),
+        Some(bytes) => {
+            let (loaded, version) = parse(&bytes)?;
+            if version < VERSION {
+                keep_original(dir, version, &bytes).map_err(LoadError::Io)?;
+            }
+            Ok(Some(loaded))
+        }
         None if BACKUPS.iter().any(|b| dir.join(b).exists()) => Err(LoadError::Unreadable(
             "The data file is missing, but a backup exists.".into(),
         )),
         None => Ok(None),
     }
+}
+
+/// Copies a pre-migration file to `kanvibe.v<old>.json`, which is never replaced or deleted.
+/// Done at load, so it is always in place before the first save after a migration.
+fn keep_original(dir: &Path, version: u32, bytes: &[u8]) -> io::Result<()> {
+    let path = dir.join(format!("kanvibe.v{version}.json"));
+    let mut out = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => return Ok(()),
+        result => result?,
+    };
+    out.write_all(bytes)?;
+    out.sync_all()
 }
 
 /// The newest backup that loads, and when it was written. `.bak1` is newer than `.bak2`.
@@ -287,7 +323,8 @@ fn read(dir: &Path) -> io::Result<Option<Vec<u8>>> {
     }
 }
 
-fn parse(bytes: &[u8]) -> Result<(Data, Settings), LoadError> {
+/// The file, repaired and migrated, and the `version` it was written with.
+fn parse(bytes: &[u8]) -> Result<(Loaded, u32), LoadError> {
     #[derive(Deserialize)]
     struct Version {
         version: u32,
@@ -298,10 +335,18 @@ fn parse(bytes: &[u8]) -> Result<(Data, Settings), LoadError> {
     if version > VERSION {
         return Err(LoadError::Newer);
     }
+    // Migrations from older versions go here, oldest first, rewriting the JSON before `FileIn`
+    // reads it. None yet: version 0 reads as version 1.
     let file: FileIn = serde_json::from_slice(bytes).map_err(unreadable)?;
-    let data = Data {
+    // A `last_board` that isn't an active Board needs no repair: `App::open` falls back.
+    let (data, repaired) = crate::repair::repair(Data {
         next_id: file.next_id,
         boards: file.boards,
+    });
+    let loaded = Loaded {
+        data,
+        settings: file.settings,
+        repaired,
     };
-    Ok((data, file.settings))
+    Ok((loaded, version))
 }

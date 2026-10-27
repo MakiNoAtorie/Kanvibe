@@ -110,8 +110,23 @@
 - `App.rendered` caches parsed markdown; `refresh_rendered()` runs after `validate_ui`. `open_link` is the only `webbrowser` call; `opens_in_browser` allows http/https/mailto.
 - Card face: title row (+ description icon), Label chips, Checklist progress.
 
+## Reorder drags (#17) and Move to Board (#16)
+- `Item::{Card, Column, Board}`; `Target::{Card, Column, ColumnGap(usize), BoardGap(usize), Board(Id)}`. Gap index = slot before item `i` (`len` = after last); `BoardGap` counts active Boards only. `Data::move_column(id, gap)`, `Data::move_board(id, gap)`.
+- A target kind registers only while its matching Item is dragged (Card slots/Board rows for Cards, gaps for Columns/Boards). Match arms on `Target` end in `_ =>`.
+- Under the threshold: `Item::Board` opens the Board, `Item::Column` does nothing. Labels that capture presses use `name_widget(field, name, size, Option<Item>)` to start a drag.
+- `sidebar::board_row` is a `drag::source`; `sidebar::view` wraps rows in `drop_row` (Card drags, non-current Boards) inside `gap()`.
+- `Data::move_to_board(card, board)` (Label match by trimmed lowercase name; target colour wins; missing Label appended; "To do" created when no Columns). `src/move_board.rs`: `App.move_picker`, `OpenMove` (M / panel button), `CloseMove`, `MoveToBoard(card, board)`; `validate_move` in `validate_ui`. Cross-Board history: `record(boards, Some(source), Some(target))`.
+- `App::selection_after_leaving(card)` (archive.rs) for any action that makes a selected Card leave; then clear `panel` if it showed that Card.
+
+## Load repair (#22, `src/repair.rs`)
+- `repair::repair(Data) -> (Data, bool)` is the one place for load repairs (pure; bool = changed); import calls it too. New invariants go there. Lenient field readers are `pub(crate)` fns in repair.rs used via `deserialize_with` (e.g. `repair::limit`).
+- `storage::open(dir) -> Result<Option<Loaded { data, settings, repaired }>, LoadError>`; `storage::load` drops `repaired`. `App::open` sets `Rotation::Off` when repaired. Settings are not repaired (`Data::fallback` handles `last_board`).
+- Duplicate IDs: first holder keeps it, later ones get fresh IDs; references stay on the first holder. Blank-name defaults: Board "Untitled", Column "New column", Card "Untitled", Label "Label".
+- Migration: pre-migration copy `kanvibe.v<old>.json` written at load with `create_new`; real migrations go in `storage::parse` before `FileIn`.
+- Tests: `tests/repair.rs` helpers `write(json)`, `load_repaired(json)`, `opened(screen)`.
+
 ## Esc order (current)
-- cancel drag → shortcuts overlay → close dialog → confirm → text field / limit / Board menu → Archive view → panel → (filter) → selection.
+- cancel drag → shortcuts overlay → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Archive view → panel → (filter) → selection.
 
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).

@@ -79,6 +79,8 @@ pub struct App {
     pub archive: Option<Id>,
     /// The Label picker over the open Card's panel; see `labels`.
     pub label_picker: Option<LabelPicker>,
+    /// The "Move to Board…" picker for this Card; see `move_board`.
+    pub move_picker: Option<Id>,
     /// The dark theme. Saved in the settings.
     pub dark: bool,
     /// Window geometry and the maximised flag. Saved with the next save, never a save on its own.
@@ -307,6 +309,11 @@ pub enum Message {
     /// L, or a click on the panel's Labels row: open the Label picker.
     OpenLabels,
     CloseLabels,
+    /// M, or "Move to Board…" in the panel: open the Board picker.
+    OpenMove,
+    CloseMove,
+    /// A Board in the picker, or a drop on a sidebar Board: move the Card there.
+    MoveToBoard(Id, Id),
     /// A picker checkbox: attach or detach the Label on the picker's Card.
     ToggleLabel(Id),
     /// A picker pencil: open (or close) the Label's editor and start renaming it.
@@ -430,6 +437,7 @@ impl App {
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape if self.confirm.is_some() => self.confirm = None,
             Message::Escape if self.label_picker.is_some() => self.escape_labels(),
+            Message::Escape if self.move_picker.is_some() => self.move_picker = None,
             Message::Escape => {
                 // One layer per press: the text field, the Archive view, the Card panel, the
                 // Filter, then the selection.
@@ -573,6 +581,12 @@ impl App {
             | Message::ToggleFilterMenu
             | Message::FilterLabel(_)
             | Message::LeaveField => return self.update_filter(message),
+            Message::OpenMove => self.open_move(),
+            Message::CloseMove => self.move_picker = None,
+            Message::MoveToBoard(card, board) => {
+                self.move_to_board(card, board);
+                return self.reveal_selection();
+            }
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -878,8 +892,24 @@ impl App {
                             return self.update(Message::Select(Selection { column, card }));
                         }
                     }
+                    (Item::Board(board), _) if !drag.started => {
+                        return self.update(Message::OpenBoard(board));
+                    }
+                    (Item::Column(_), _) if !drag.started => {}
+                    (Item::Card(card), Some(Target::Board(board))) => {
+                        return self.update(Message::MoveToBoard(card, board));
+                    }
                     (Item::Card(card), Some(target)) => self.drop_card(card, target),
-                    (_, None) => {} // released outside any target: cancel
+                    (Item::Column(column), Some(Target::ColumnGap(gap))) => {
+                        self.data.move_column(column, gap);
+                        let board = self.board_of_column(column);
+                        self.history.record(&self.data.boards, board, board);
+                    }
+                    (Item::Board(board), Some(Target::BoardGap(gap))) => {
+                        self.data.move_board(board, gap);
+                        self.history.record(&self.data.boards, None, None);
+                    }
+                    _ => {} // released outside any target, or on the wrong kind: cancel
                 }
             }
             Message::DragCancel => self.drag = None,
@@ -889,7 +919,7 @@ impl App {
                 {
                     let column = match drag.target() {
                         Some(Target::Card { column, .. } | Target::Column(column)) => Some(column),
-                        None => None,
+                        _ => None,
                     };
                     return drag::autoscroll(cursor, BOARD_SCROLL.into(), column.map(cards_widget));
                 }
@@ -903,6 +933,7 @@ impl App {
         let (column, gap) = match target {
             Target::Card { column, index } => (column, index),
             Target::Column(column) => (column, usize::MAX),
+            _ => return,
         };
         let cards = self.find_column(column).map_or(&[][..], |c| &c.cards);
         let gap = filter::placement(cards, gap, |c| self.shown(c));
@@ -1057,6 +1088,7 @@ impl App {
         self.validate_archive();
         self.validate_labels();
         self.validate_filter();
+        self.validate_move();
         let on_board = |card: Id| {
             self.board().is_some_and(|b| {
                 b.columns
@@ -1159,6 +1191,17 @@ impl App {
         name: &'a str,
         size: u32,
     ) -> Element<'a, Message> {
+        self.name_widget(field, name, size, None)
+    }
+
+    /// [`Self::editable_name`], whose label also starts a drag of `drag` on press.
+    fn name_widget<'a>(
+        &'a self,
+        field: Field,
+        name: &'a str,
+        size: u32,
+        drag: Option<Item>,
+    ) -> Element<'a, Message> {
         match &self.editing {
             Some(edit) if edit.field == field => text_input("Name", &edit.text)
                 .id(EDIT_INPUT)
@@ -1170,6 +1213,12 @@ impl App {
             _ => {
                 let label = mouse_area(text(name).size(size).wrapping(text::Wrapping::None))
                     .on_double_click(Message::StartEdit(field));
+                let label = match drag {
+                    Some(item) => label
+                        .on_press(Message::DragPress(item))
+                        .on_release(Message::DragEnd),
+                    None => label,
+                };
                 let full = container(text(name))
                     .padding(4)
                     .style(container::rounded_box);
@@ -1207,6 +1256,10 @@ impl App {
             Some(picker) => stack![content, self.view_label_picker(picker)].into(),
             None => content,
         };
+        let content: Element<_> = match self.move_picker {
+            Some(card) => stack![content, self.view_move_picker(card)].into(),
+            None => content,
+        };
         let content: Element<_> = match &self.not_saved {
             Some(error) => column![
                 container(text(error))
@@ -1239,15 +1292,8 @@ impl App {
     /// The dragged Card under the cursor, once the drag has started.
     fn ghost(&self) -> Option<Element<'_, Message>> {
         let drag = self.drag.as_ref().filter(|d| d.started)?;
-        let Item::Card(card) = drag.item;
-        let mut cards = self
-            .data
-            .boards
-            .iter()
-            .flat_map(|b| &b.columns)
-            .flat_map(|c| &c.cards);
-        let title = &cards.find(|c| c.id == card)?.title;
-        Some(drag::ghost(title, drag.cursor?))
+        let (Item::Card(id) | Item::Column(id) | Item::Board(id)) = drag.item;
+        Some(drag::ghost(self.data.name(id)?, drag.cursor?))
     }
 
     /// Retry / Save a copy as… / Quit without saving, over the dimmed app.
@@ -1271,14 +1317,24 @@ impl App {
     }
 
     fn view_board<'a>(&'a self, board: &'a Board) -> Element<'a, Message> {
-        let columns = board
-            .columns
-            .iter()
-            .map(|c| self.view_column(c))
-            .chain([button("+ Add Column")
+        // Gaps sit between Columns (and at both ends); only a Column drag registers them.
+        let dragged = matches!(self.drag.as_ref().map(|d| d.item), Some(Item::Column(_)));
+        let hovered = self.drag.as_ref().and_then(Drag::target);
+        let gap = |i: usize| {
+            let line = drag::indicator_v(hovered == Some(Target::ColumnGap(i)));
+            drag::target(mouse_area(line), Target::ColumnGap(i), dragged).into()
+        };
+        let mut columns: Vec<Element<_>> = Vec::new();
+        for (i, c) in board.columns.iter().enumerate() {
+            columns.extend([gap(i), self.view_column(c)]);
+        }
+        columns.extend([
+            gap(board.columns.len()),
+            button("+ Add Column")
                 .style(button::secondary)
                 .on_press(Message::AddColumn(board.id))
-                .into()]);
+                .into(),
+        ]);
         let header = row![
             self.editable_name(Field::BoardName(board.id), &board.name, 20),
             self.filter_bar(),
@@ -1307,7 +1363,7 @@ impl App {
             .extend(menu)
             .extend(self.filter_lines(board))
             .push(
-                scrollable(row(columns).spacing(12).height(Fill))
+                scrollable(row(columns).height(Fill))
                     .id(BOARD_SCROLL)
                     .horizontal()
                     .height(Fill),
@@ -1319,7 +1375,8 @@ impl App {
 
     fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
         let selection = self.selection.filter(|s| s.column == col.id);
-        let dragging = self.drag.is_some();
+        // Only a Card drag registers Card slots and Column bodies; Column drags use gaps.
+        let dragging = matches!(self.drag.as_ref().map(|d| d.item), Some(Item::Card(_)));
         // The slot the drop indicator shows: before Card `gap`, or after the last.
         let gap = match self.drag.as_ref().and_then(Drag::target) {
             Some(Target::Card { column, index }) if column == col.id => Some(index),
@@ -1377,8 +1434,10 @@ impl App {
         } else {
             count
         };
+        // Dragged by the header only; the name label forwards the press (it captures its own).
+        let item = Item::Column(col.id);
         let header = row![
-            self.editable_name(Field::ColumnName(col.id), &col.name, 16),
+            self.name_widget(Field::ColumnName(col.id), &col.name, 16, Some(item)),
             count,
             button("⋯")
                 .style(button::text)
@@ -1386,6 +1445,7 @@ impl App {
         ]
         .spacing(8)
         .align_y(Center);
+        let header = drag::source(header, item);
         let menu: Option<Element<_>> = match &self.limit_input {
             Some(input) if input.column == col.id => Some(
                 text_input("Limit (blank removes)", &input.text)
@@ -1670,7 +1730,11 @@ impl App {
     /// Loads the data folder (created if missing) and reopens the last open Board, else the first.
     pub fn open(dir: PathBuf) -> Result<App, storage::LoadError> {
         fs::create_dir_all(&dir).map_err(storage::LoadError::Io)?;
-        let (data, settings) = storage::load(&dir)?.unwrap_or_default();
+        let storage::Loaded {
+            data,
+            settings,
+            repaired,
+        } = storage::open(&dir)?.unwrap_or_default();
         let ids: Vec<Id> = data.boards.iter().map(|b| b.id).collect();
         let last = settings.last_board.or(ids.first().copied());
         let current_board = data.fallback(last, &ids);
@@ -1682,6 +1746,12 @@ impl App {
             data,
             current_board,
             data_dir: Some(dir),
+            // A repaired file didn't load cleanly: rotating would push a good backup out.
+            rotation: if repaired {
+                storage::Rotation::Off
+            } else {
+                storage::Rotation::Due
+            },
             ..App::default()
         })
     }
