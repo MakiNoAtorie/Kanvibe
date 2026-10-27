@@ -6,6 +6,9 @@ use iced::{Element, Event, Fill, Subscription, Task, event, keyboard};
 
 use crate::domain::{Board, Column, Data, Id};
 use crate::history::History;
+use crate::storage::{self, Settings};
+use std::path::PathBuf;
+use std::{fs, io};
 
 const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
@@ -20,6 +23,10 @@ pub struct App {
     pub capture: Option<Capture>,
     /// Undo history of the Boards; in memory only.
     pub history: History,
+    /// Where `kanvibe.json` lives; `None` (the default) saves nothing.
+    pub data_dir: Option<PathBuf>,
+    /// What the data file last saved holds, so only changes are saved.
+    pub saved: (Data, Settings),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -226,8 +233,64 @@ fn undo_shortcut(event: &keyboard::Event) -> Option<bool> {
     }
 }
 
+impl App {
+    /// Loads the data folder (created if missing) and reopens the last open Board, else the first.
+    pub fn open(dir: PathBuf) -> io::Result<App> {
+        fs::create_dir_all(&dir)?;
+        let (data, settings) = storage::load(&dir)?.unwrap_or_default();
+        let current_board = settings
+            .last_board
+            .filter(|id| data.boards.iter().any(|b| b.id == *id))
+            .or(data.boards.first().map(|b| b.id));
+        Ok(App {
+            saved: (data.clone(), settings),
+            data,
+            current_board,
+            data_dir: Some(dir),
+            ..App::default()
+        })
+    }
+
+    /// Saves the data file if the Boards or settings differ from what it holds.
+    /// Runs after every `update`.
+    pub fn save_if_changed(&mut self) {
+        let Some(dir) = &self.data_dir else { return };
+        let settings = Settings {
+            last_board: self.current_board,
+        };
+        if self.saved.0 == self.data && self.saved.1 == settings {
+            return;
+        }
+        match storage::save(dir, &self.data, &settings) {
+            Ok(()) => self.saved = (self.data.clone(), settings),
+            // ponytail: stderr only; #21 adds the "Not saved" bar, the background writer and retries.
+            // Keeping `saved` stale makes the next update retry.
+            Err(e) => eprintln!("Not saved: {}: {e}", dir.display()),
+        }
+    }
+}
+
 pub fn run() -> iced::Result {
-    iced::application(App::default, App::update, App::view)
+    let Some(dir) = storage::data_dir(std::env::args().skip(1)) else {
+        eprintln!("No local app data folder; pass --data-dir <path>");
+        std::process::exit(1);
+    };
+    // ponytail: a load error exits so the bad file is never overwritten; #19 adds the problem screens.
+    let app = match App::open(dir.clone()) {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("Can't open {}: {e}", dir.display());
+            std::process::exit(1);
+        }
+    };
+    let app = std::cell::Cell::new(Some(app));
+    let boot = move || app.take().expect("iced boots once");
+    let update = |app: &mut App, message| {
+        let task = app.update(message);
+        app.save_if_changed();
+        task
+    };
+    iced::application(boot, update, App::view)
         .title("Kanvibe")
         .subscription(App::subscription)
         .run()

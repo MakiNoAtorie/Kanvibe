@@ -1,29 +1,33 @@
 //! Plain data and pure operations on Boards, Columns and Cards. No iced types.
 
+use serde::{Deserialize, Serialize};
+
 pub type Id = u64;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Data {
     /// Monotonic ID counter, shared by every entity type, never reused.
     pub next_id: Id,
     pub boards: Vec<Board>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Board {
     pub id: Id,
     pub name: String,
+    #[serde(default)]
     pub columns: Vec<Column>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     pub id: Id,
     pub name: String,
+    #[serde(default)]
     pub cards: Vec<Card>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Card {
     pub id: Id,
     pub title: String,
