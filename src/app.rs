@@ -55,6 +55,8 @@ pub struct App {
     /// The persistent bar: "Not saved: <path>: <OS error>". Cleared by a successful save.
     pub not_saved: Option<String>,
     pub closing: Closing,
+    /// The Card the Card panel shows. It follows the selected Card; see `validate_ui`.
+    pub panel: Option<Id>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,12 +123,13 @@ pub struct Capture {
 pub enum Field {
     BoardName(Id),
     ColumnName(Id),
+    CardTitle(Id),
 }
 
 impl Field {
     fn id(self) -> Id {
         match self {
-            Field::BoardName(id) | Field::ColumnName(id) => id,
+            Field::BoardName(id) | Field::ColumnName(id) | Field::CardTitle(id) => id,
         }
     }
 }
@@ -191,10 +194,22 @@ pub enum Message {
     /// `None` when the Save dialog was cancelled; `Err` holds the "Not saved" bar text.
     CopySaved(Option<Result<(), String>>),
     QuitWithoutSaving,
+    /// Enter: open the Card panel on the selected Card.
+    OpenPanel,
+    /// The panel's X button.
+    ClosePanel,
+    /// F2: edit the open Card's title.
+    EditTitle,
 }
 
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.apply(message);
+        self.validate_ui();
+        task
+    }
+
+    fn apply(&mut self, message: Message) -> Task<Message> {
         self.history.sync(&self.data.boards);
         match message {
             Message::NewBoard => {
@@ -241,12 +256,13 @@ impl App {
             }
             Message::Escape if self.closing == Closing::Asking => self.closing = Closing::No,
             Message::Escape => {
-                // One layer per press: the text field, then the selection.
+                // One layer per press: the text field, the Card panel, then the selection.
                 if self.board_name.is_none()
                     && self.capture.is_none()
                     && self.editing.is_none()
                     && self.column_menu.is_none()
                     && self.limit_input.is_none()
+                    && self.panel.take().is_none()
                 {
                     self.selection = None;
                 }
@@ -269,7 +285,23 @@ impl App {
             Message::Select(selection) => {
                 self.commit_pending();
                 self.selection = Some(selection);
+                if selection.card.is_some() {
+                    self.panel = selection.card; // clicking a Card opens or switches the panel
+                }
                 return self.reveal_selection();
+            }
+            Message::OpenPanel => {
+                self.commit_pending();
+                self.panel = self.selection.and_then(|s| s.card).or(self.panel);
+            }
+            Message::ClosePanel => {
+                self.commit_pending();
+                self.panel = None;
+            }
+            Message::EditTitle => {
+                if let Some(card) = self.panel {
+                    return self.update(Message::StartEdit(Field::CardTitle(card)));
+                }
             }
             Message::MoveSelection(direction) => {
                 self.commit_pending();
@@ -471,6 +503,12 @@ impl App {
             let board = match edit.field {
                 Field::BoardName(_) => None,
                 Field::ColumnName(column) => self.board_of_column(column),
+                Field::CardTitle(card) => {
+                    if self.data.name(card) != Some(edit.start.as_str()) {
+                        self.data.touch(card); // a changed title is the Card's own change
+                    }
+                    self.board_of_card(card)
+                }
             };
             self.history.record(&self.data.boards, board, board);
         }
@@ -508,6 +546,32 @@ impl App {
                 }),
             None => board.columns.iter().any(|c| c.id == s.column).then_some(s),
         });
+    }
+
+    /// Runs at the end of every `update`: Selection and panel are cleared when their Card is no
+    /// longer an active Card on the current Board, and an open panel follows the selected Card.
+    fn validate_ui(&mut self) {
+        self.validate_selection();
+        let on_board = |card: Id| {
+            self.board().is_some_and(|b| {
+                b.columns
+                    .iter()
+                    .any(|c| c.cards.iter().any(|x| x.id == card))
+            })
+        };
+        self.panel = self.panel.filter(|card| on_board(*card));
+        if self.panel.is_some() {
+            self.panel = self.selection.and_then(|s| s.card).or(self.panel);
+        }
+    }
+
+    fn board_of_card(&self, card: Id) -> Option<Id> {
+        let board = self.data.boards.iter().find(|b| {
+            b.columns
+                .iter()
+                .any(|c| c.cards.iter().any(|x| x.id == card))
+        })?;
+        Some(board.id)
     }
 
     /// The current Board.
@@ -573,7 +637,12 @@ impl App {
     }
 
     /// A name that turns into a text box on double-click, through the pending-edit model.
-    fn editable_name<'a>(&'a self, field: Field, name: &'a str, size: u32) -> Element<'a, Message> {
+    pub(crate) fn editable_name<'a>(
+        &'a self,
+        field: Field,
+        name: &'a str,
+        size: u32,
+    ) -> Element<'a, Message> {
         match &self.editing {
             Some(edit) if edit.field == field => text_input("Name", &edit.text)
                 .id(EDIT_INPUT)
@@ -605,6 +674,11 @@ impl App {
         {
             Some(board) => self.view_board(board),
             None => self.view_empty(),
+        };
+        // The panel pushes the Board narrower; it never overlays it.
+        let content: Element<_> = match self.panel.and_then(|id| self.data.card(id)) {
+            Some(card) => row![container(content).width(Fill), self.view_panel(card)].into(),
+            None => content,
         };
         let content: Element<_> = match &self.not_saved {
             Some(error) => column![
