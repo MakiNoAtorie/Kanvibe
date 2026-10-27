@@ -1,11 +1,10 @@
 //! Labels: the palette, Label operations on `Data`, the Label picker overlay and Card chips.
 use iced::widget::{
-    button, center, checkbox, column, container, opaque, operation, row, scrollable, space, stack,
-    text, text_input,
+    button, checkbox, column, container, operation, row, scrollable, space, text, text_input,
 };
 use iced::{Border, Center, Color, Element, Fill, Task};
 
-use crate::app::{App, EDIT_INPUT, Field, Message};
+use crate::app::{App, Confirm, EDIT_INPUT, Field, Message, dialog};
 use crate::domain::{Board, Card, Data, Id, Label, now};
 
 /// The Label palette: stable keys (what files store) and colours that read in light and dark
@@ -205,8 +204,6 @@ pub struct LabelPicker {
     pub expanded: Option<Id>,
     /// The "+ New Label" form.
     pub new: Option<NewLabel>,
-    /// The Label a delete prompt is asking about.
-    pub confirm: Option<Id>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -229,7 +226,6 @@ impl App {
                         card,
                         expanded: None,
                         new: None,
-                        confirm: None,
                     });
                 }
             }
@@ -257,25 +253,14 @@ impl App {
                     record(self, board);
                 }
             }
-            Message::DeleteLabel(label) => {
-                if self.data.label_use(label) > 0 {
-                    if let Some(picker) = &mut self.label_picker {
-                        picker.confirm = Some(label);
-                    }
-                } else {
-                    self.delete_label(label);
+            Message::DeleteLabel(label) => match delete_prompt(&self.data, label) {
+                Some(prompt) => {
+                    let action = Message::RemoveLabel(label);
+                    self.confirm = Some(Confirm { prompt, action });
                 }
-            }
-            Message::ConfirmDeleteLabel => {
-                if let Some(label) = self.label_picker.as_mut().and_then(|p| p.confirm.take()) {
-                    self.delete_label(label);
-                }
-            }
-            Message::CancelDeleteLabel => {
-                if let Some(picker) = &mut self.label_picker {
-                    picker.confirm = None;
-                }
-            }
+                None => self.delete_label(label),
+            },
+            Message::RemoveLabel(label) => self.delete_label(label),
             Message::NewLabel => {
                 let used = |key: &str| {
                     let board = self.board();
@@ -323,18 +308,14 @@ impl App {
         }
     }
 
-    /// Esc on the picker: the delete prompt closes first, then the picker.
+    /// Esc on the picker closes it (an open delete prompt is closed first by `App.confirm`).
     pub(crate) fn escape_labels(&mut self) {
         self.commit_pending();
-        if let Some(picker) = &mut self.label_picker
-            && picker.confirm.take().is_none()
-        {
-            self.label_picker = None;
-        }
+        self.label_picker = None;
     }
 
     /// Run after every update: the picker lives only while its Card's panel is open, and drops
-    /// a delete prompt or editor whose Label is gone.
+    /// an editor whose Label is gone.
     pub(crate) fn validate_labels(&mut self) {
         if self
             .label_picker
@@ -345,7 +326,6 @@ impl App {
         }
         if let Some(p) = &mut self.label_picker {
             let exists = |id: &Id| self.data.label(*id).is_some();
-            p.confirm = p.confirm.filter(exists);
             p.expanded = p.expanded.filter(exists);
         }
     }
@@ -369,7 +349,7 @@ impl App {
         .into()
     }
 
-    /// The picker overlay over the dimmed app, with the delete prompt on top of it.
+    /// The picker overlay over the dimmed app.
     pub(crate) fn view_label_picker<'a>(&'a self, picker: &'a LabelPicker) -> Element<'a, Message> {
         let Some((board, card)) = self.board().zip(self.data.card(picker.card)) else {
             return space().into();
@@ -385,23 +365,7 @@ impl App {
         let rows = self.picker_rows(board, &card.labels, Message::ToggleLabel, Some(picker));
         let list = scrollable(rows).height(Fill);
         let body = column![header, list, self.new_label_form(board, picker)].spacing(12);
-        let dialog = overlay(container(body).width(360).max_height(520).into());
-        match picker.confirm.and_then(|l| delete_prompt(&self.data, l)) {
-            Some(prompt) => {
-                let buttons = row![
-                    button("Delete")
-                        .style(button::danger)
-                        .on_press(Message::ConfirmDeleteLabel),
-                    button("Cancel")
-                        .style(button::secondary)
-                        .on_press(Message::CancelDeleteLabel),
-                ]
-                .spacing(8);
-                let ask = column![text(prompt), buttons].spacing(12).max_width(360);
-                stack![dialog, overlay(ask.into())].into()
-            }
-            None => dialog,
-        }
+        dialog(container(body).width(360).max_height(520))
     }
 
     /// One row per Label of `board`: a checkbox that sends `toggle(id)`. With `editing` there is
@@ -504,15 +468,6 @@ fn clash_text<'a>() -> Element<'a, Message> {
         .size(12)
         .style(text::danger)
         .into()
-}
-
-/// A dimmed backdrop with `content` in a box in the middle; it blocks clicks to what is below.
-fn overlay(content: Element<'_, Message>) -> Element<'_, Message> {
-    let dim = |_: &iced::Theme| container::Style {
-        background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
-        ..Default::default()
-    };
-    opaque(center(container(content).padding(20).style(container::rounded_box)).style(dim))
 }
 
 /// The palette as round buttons; `current` has a ring.

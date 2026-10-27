@@ -290,7 +290,7 @@ fn deleting_an_unused_label_needs_no_prompt() {
     let bug = label(&app, "Bug");
     send(&mut app, [Message::DeleteLabel(bug)]);
     assert!(names(&app).is_empty());
-    assert_eq!(app.label_picker.as_ref().unwrap().confirm, None);
+    assert_eq!(app.confirm, None);
     send(&mut app, [Message::Undo]);
     assert_eq!(names(&app), ["Bug"]);
 }
@@ -316,9 +316,12 @@ fn deleting_an_in_use_label_asks_with_the_count_then_strips_every_card() {
     );
     send(&mut app, [Message::DeleteLabel(bug)]);
     assert_eq!(names(&app), ["Bug"]); // nothing yet
-    assert_eq!(app.label_picker.as_ref().unwrap().confirm, Some(bug));
     assert_eq!(
-        labels::delete_prompt(&app.data, bug).as_deref(),
+        app.confirm.as_ref().map(|c| c.action.clone()),
+        Some(Message::RemoveLabel(bug))
+    );
+    assert_eq!(
+        app.confirm.as_ref().map(|c| c.prompt.as_str()),
         Some("Delete Label \"Bug\"? It is on 2 Cards.")
     );
     app.data.boards[0]
@@ -326,12 +329,12 @@ fn deleting_an_in_use_label_asks_with_the_count_then_strips_every_card() {
         .iter_mut()
         .flat_map(|c| &mut c.cards)
         .for_each(|c| c.updated = OLD.into());
-    send(&mut app, [Message::ConfirmDeleteLabel]);
+    send(&mut app, [Message::Confirm]);
     assert!(names(&app).is_empty());
     assert!(on_card(&app, "A").is_empty() && on_card(&app, "B").is_empty());
     assert_ne!(updated(&app, "A"), OLD);
     assert_ne!(updated(&app, "B"), OLD);
-    assert_eq!(app.label_picker.as_ref().unwrap().confirm, None);
+    assert_eq!(app.confirm, None);
     send(&mut app, [Message::Undo]); // one step restores the Label and both attachments
     assert_eq!(names(&app), ["Bug"]);
     assert_eq!(on_card(&app, "A"), ["Bug"]);
@@ -348,10 +351,10 @@ fn the_prompt_uses_the_singular_for_one_card_and_cancel_keeps_the_label() {
         [Message::ToggleLabel(bug), Message::DeleteLabel(bug)],
     );
     assert_eq!(
-        labels::delete_prompt(&app.data, bug).as_deref(),
+        app.confirm.as_ref().map(|c| c.prompt.as_str()),
         Some("Delete Label \"Bug\"? It is on 1 Card.")
     );
-    send(&mut app, [Message::CancelDeleteLabel]);
+    send(&mut app, [Message::Escape]);
     assert_eq!(names(&app), ["Bug"]);
     assert_eq!(on_card(&app, "A"), ["Bug"]);
 }
@@ -366,7 +369,7 @@ fn escape_backs_out_confirm_then_picker_then_panel() {
         [Message::ToggleLabel(bug), Message::DeleteLabel(bug)],
     );
     send(&mut app, [Message::Escape]);
-    assert_eq!(app.label_picker.as_ref().unwrap().confirm, None);
+    assert_eq!(app.confirm, None);
     assert_eq!(names(&app), ["Bug"]);
     send(&mut app, [Message::Escape]);
     assert!(app.label_picker.is_none());

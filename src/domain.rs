@@ -15,6 +15,9 @@ pub struct Data {
 pub struct Board {
     pub id: Id,
     pub name: String,
+    /// Archived Boards sit in the sidebar's "Archived (n)" section and cannot be opened.
+    #[serde(default)]
+    pub archived: bool,
     #[serde(default)]
     pub columns: Vec<Column>,
     /// This Board's Labels, in display order.
@@ -102,10 +105,60 @@ impl Data {
         self.boards.push(Board {
             id,
             name: name.into(),
+            archived: false,
             columns,
             labels: Vec::new(),
         });
         Some(id)
+    }
+
+    /// The active Board with this ID.
+    pub fn active_board(&self, id: Id) -> Option<&Board> {
+        self.boards.iter().find(|b| b.id == id && !b.archived)
+    }
+
+    /// Archives an active Board. Unknown or already archived: nothing.
+    pub fn archive_board(&mut self, id: Id) -> Option<()> {
+        let board = self.boards.iter_mut().find(|b| b.id == id && !b.archived)?;
+        board.archived = true;
+        Some(())
+    }
+
+    /// Permanently removes an archived Board with everything in it. Active Boards: nothing.
+    pub fn delete_board(&mut self, id: Id) -> Option<()> {
+        let at = self.boards.iter().position(|b| b.id == id && b.archived)?;
+        self.boards.remove(at);
+        Some(())
+    }
+
+    /// Makes an archived Board active again, at the bottom of the active list.
+    pub fn restore_board(&mut self, id: Id) -> Option<()> {
+        let at = self.boards.iter().position(|b| b.id == id && b.archived)?;
+        let mut board = self.boards.remove(at);
+        board.archived = false;
+        self.boards.push(board);
+        Some(())
+    }
+
+    /// The Board to show for `current`: itself while active; if archived or gone, the next
+    /// active Board below it, else the one above, else the first active one; `None` stays `None`.
+    /// `order` is the Board IDs from before the change, used when `current` is gone.
+    pub fn fallback(&self, current: Option<Id>, order: &[Id]) -> Option<Id> {
+        let current = current?;
+        if self.active_board(current).is_some() {
+            return Some(current);
+        }
+        let now: Vec<Id> = self.boards.iter().map(|b| b.id).collect();
+        let order = if now.contains(&current) { &now } else { order };
+        let at = order.iter().position(|id| *id == current).unwrap_or(0);
+        let (above, below) = order.split_at(at);
+        let active = |id: &&Id| self.active_board(**id).is_some();
+        below
+            .iter()
+            .find(active)
+            .or(above.iter().rev().find(active))
+            .or(now.iter().find(active))
+            .copied()
     }
 
     /// Appends an empty Column after the Board's last one. An unknown Board creates nothing.

@@ -33,6 +33,7 @@ fn round_trip_keeps_boards_columns_cards_and_next_id_pretty_printed() {
     let data = sample();
     let settings = Settings {
         last_board: Some(data.boards[1].id),
+        sidebar_collapsed: true,
     };
 
     storage::save(&dir, &data, &settings).unwrap();
@@ -66,6 +67,7 @@ fn app_reopens_the_last_open_board() {
         &data,
         &Settings {
             last_board: Some(home),
+            ..Settings::default()
         },
     )
     .unwrap();
@@ -81,7 +83,15 @@ fn app_opens_the_first_board_when_the_last_board_is_unknown_or_unset() {
     let (_tmp, dir) = data_dir();
     let data = sample();
     for last_board in [Some(999), None] {
-        storage::save(&dir, &data, &Settings { last_board }).unwrap();
+        storage::save(
+            &dir,
+            &data,
+            &Settings {
+                last_board,
+                ..Settings::default()
+            },
+        )
+        .unwrap();
         let app = App::open(dir.clone()).unwrap();
         assert_eq!(app.current_board, Some(data.boards[0].id));
     }
@@ -788,6 +798,7 @@ fn read(dir: &Path, name: &str) -> String {
 fn saved_sample(dir: &Path) -> String {
     let settings = Settings {
         last_board: Some(sample().boards[0].id),
+        ..Settings::default()
     };
     storage::save(dir, &sample(), &settings).unwrap();
     read(dir, "kanvibe.json")
