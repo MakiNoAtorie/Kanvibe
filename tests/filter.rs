@@ -451,3 +451,42 @@ fn ctrl_left_right_under_a_filter_lands_after_the_last_visible_card() {
     send(&mut app, [Message::MoveCard(Right)]);
     assert_eq!(titles(&app, 1), ["bug 2", "h1", "h2", "bug 1"]);
 }
+
+#[test]
+fn home_and_end_select_the_first_and_last_visible_card() {
+    use kanvibe::app::Direction::*;
+    let mut app = app_with(&[&["x", "bug 1", "y", "bug 2", "z"]]);
+    send(&mut app, [Message::FilterChanged("bug".into())]);
+    send(&mut app, [Message::MoveSelection(Bottom)]);
+    assert_eq!(
+        selected(&app),
+        Some("bug 1"),
+        "no selection: the first visible Card"
+    );
+    send(&mut app, [Message::MoveSelection(Bottom)]);
+    assert_eq!(selected(&app), Some("bug 2"));
+    send(&mut app, [Message::MoveSelection(Top)]);
+    assert_eq!(selected(&app), Some("bug 1"));
+}
+
+#[test]
+fn ctrl_home_end_move_the_card_past_the_other_visible_cards() {
+    use kanvibe::app::Direction::*;
+    let mut app = app_with(&[&["h0", "bug 1", "h1", "bug 2", "bug 3", "h2"]]);
+    send(&mut app, [Message::FilterChanged("bug".into())]);
+    select(&mut app, "bug 2");
+    send(&mut app, [Message::MoveCard(Top)]);
+    assert_eq!(
+        titles(&app, 0),
+        ["h0", "bug 2", "bug 1", "h1", "bug 3", "h2"]
+    );
+    send(&mut app, [Message::MoveCard(Bottom)]);
+    assert_eq!(
+        titles(&app, 0),
+        ["h0", "bug 1", "h1", "bug 3", "bug 2", "h2"]
+    );
+    send(&mut app, [Message::MoveCard(Bottom)]);
+    let same = ["h0", "bug 1", "h1", "bug 3", "bug 2", "h2"];
+    assert_eq!(titles(&app, 0), same, "already the last visible Card");
+    assert_eq!(selected(&app), Some("bug 2"));
+}

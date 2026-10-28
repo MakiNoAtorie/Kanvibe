@@ -401,3 +401,27 @@ fn the_archived_heading_shows_whether_it_is_open() {
             .is_ok()
     );
 }
+
+#[test]
+fn ctrl_tab_cycles_the_active_boards_and_wraps() {
+    let (mut app, [a, b, c]) = app_with_boards();
+    send(&mut app, [Message::CycleBoard(true)]);
+    assert_eq!(
+        app.current_board,
+        Some(a),
+        "wraps from the last to the first"
+    );
+    send(&mut app, [Message::CycleBoard(false)]);
+    assert_eq!(app.current_board, Some(c));
+
+    send(&mut app, [Message::ArchiveBoard(b), Message::OpenBoard(a)]);
+    send(&mut app, [Message::CycleBoard(true)]);
+    assert_eq!(app.current_board, Some(c), "skips archived Boards");
+
+    send(
+        &mut app,
+        [Message::ArchiveBoard(a), Message::ArchiveBoard(c)],
+    );
+    send(&mut app, [Message::CycleBoard(true)]);
+    assert_eq!(app.current_board, None, "no active Board: nothing to open");
+}

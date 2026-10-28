@@ -13,6 +13,12 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("N", "New Card in the selected Column"),
     ("Arrow keys", "Move the selection"),
     ("Ctrl+Arrow keys", "Move the selected Card"),
+    ("Home / End", "Select the first / last Card in the Column"),
+    (
+        "Ctrl+Home / Ctrl+End",
+        "Move the selected Card to the top / bottom",
+    ),
+    ("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous Board"),
     ("Enter", "Open the Card panel"),
     ("F2", "Rename the open or selected Card"),
     ("E", "Edit the open or selected Card's description"),

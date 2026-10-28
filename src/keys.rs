@@ -56,6 +56,9 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         (false, Some('l')) if !typing && !modifiers.alt() => return Some(Message::OpenLabels),
         _ => {}
     }
+    if ctrl && *key == Key::Named(Named::Tab) {
+        return Some(Message::CycleBoard(!modifiers.shift()));
+    }
     if *key == Key::Named(Named::F1) {
         return Some(Message::ShowShortcuts);
     }
@@ -83,6 +86,8 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         Key::Named(Named::ArrowRight) => Direction::Right,
         Key::Named(Named::ArrowUp) => Direction::Up,
         Key::Named(Named::ArrowDown) => Direction::Down,
+        Key::Named(Named::Home) => Direction::Top,
+        Key::Named(Named::End) => Direction::Bottom,
         _ => return None,
     };
     Some(if ctrl {

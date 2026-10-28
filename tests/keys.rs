@@ -284,3 +284,33 @@ fn only_esc_reaches_the_app_while_the_close_dialog_is_open() {
     app.not_saved = Some("Not saved: kanvibe.json: disk full".into());
     only_esc_gets_through(&mut app, |app| app.closing == Closing::No);
 }
+
+#[test]
+fn ctrl_tab_cycles_boards_even_while_typing_and_home_end_select_or_move() {
+    let ctrl_shift_tab = press(Key::Named(Named::Tab), Modifiers::CTRL | Modifiers::SHIFT);
+    for context in [NOTHING_FOCUSED, CAPTURE_FOCUSED] {
+        assert_eq!(
+            keys::map(&ctrl_named(Named::Tab), &context),
+            Some(Message::CycleBoard(true))
+        );
+        assert_eq!(
+            keys::map(&ctrl_shift_tab, &context),
+            Some(Message::CycleBoard(false))
+        );
+    }
+    assert_eq!(keys::map(&named(Named::Tab), &NOTHING_FOCUSED), None);
+    for (key, direction) in [
+        (Named::Home, Direction::Top),
+        (Named::End, Direction::Bottom),
+    ] {
+        assert_eq!(
+            keys::map(&named(key), &NOTHING_FOCUSED),
+            Some(Message::MoveSelection(direction))
+        );
+        assert_eq!(
+            keys::map(&ctrl_named(key), &NOTHING_FOCUSED),
+            Some(Message::MoveCard(direction))
+        );
+        assert_eq!(keys::map(&named(key), &CAPTURE_FOCUSED), None);
+    }
+}

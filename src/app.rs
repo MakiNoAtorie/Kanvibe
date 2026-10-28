@@ -117,6 +117,10 @@ pub enum Direction {
     Right,
     Up,
     Down,
+    /// Home: the first Card of the Column.
+    Top,
+    /// End: the last Card of the Column.
+    Bottom,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -266,6 +270,9 @@ pub enum Message {
     QuitWithoutSaving,
     /// A Board row in the sidebar: switch to it. Archived Boards cannot be opened.
     OpenBoard(Id),
+    /// Ctrl+Tab (`true`) / Ctrl+Shift+Tab (`false`): the next / previous active Board in
+    /// sidebar order, wrapping around.
+    CycleBoard(bool),
     /// "Archive Board" in the Board's ⋯ menu.
     ArchiveBoard(Id),
     /// Restore on an archived Board's sidebar row.
@@ -855,6 +862,20 @@ impl App {
                 self.commit_pending();
                 if self.data.active_board(board).is_some() {
                     self.current_board = Some(board);
+                }
+            }
+            Message::CycleBoard(forward) => {
+                let active: Vec<Id> = (self.data.boards.iter())
+                    .filter(|b| !b.archived)
+                    .map(|b| b.id)
+                    .collect();
+                let n = active.len();
+                let at = self
+                    .current_board
+                    .and_then(|c| active.iter().position(|id| *id == c));
+                let next = at.map_or(0, |i| if forward { i + 1 } else { i + n - 1 });
+                if let Some(board) = (n > 0).then(|| active[next % n]) {
+                    return self.update(Message::OpenBoard(board));
                 }
             }
             Message::ArchiveBoard(board) => {
@@ -1979,6 +2000,8 @@ fn moved(
             let next = index.map_or(0, |i| i + 1);
             (next < cards.len()).then(|| at(column, Some(next)))
         }
+        Direction::Top => Some(at(column, Some(0))),
+        Direction::Bottom => Some(at(column, Some(cards.len().saturating_sub(1)))),
         Direction::Left | Direction::Right => {
             let next = match direction {
                 Direction::Left => board.columns.get(ci.checked_sub(1)?)?,
@@ -1994,6 +2017,7 @@ fn moved(
 
 /// Where Ctrl+arrow moves the selected Card: (Card, Column, index). `None` = no Card or at an end.
 /// Up/Down go just before the previous / just after the next Card `shown` by the Filter;
+/// Top/Bottom (Home/End) just before the first / just after the last other shown Card;
 /// Left/Right go after the last shown Card of the neighbouring Column.
 fn card_move(
     board: &Board,
@@ -2010,6 +2034,14 @@ fn card_move(
         Direction::Down => {
             let next = i + 1 + cards[i + 1..].iter().position(&shown)?;
             Some((card, column.id, next))
+        }
+        Direction::Top => {
+            let first = cards.iter().position(&shown)?;
+            (first < i).then_some((card, column.id, first))
+        }
+        Direction::Bottom => {
+            let last = cards.iter().rposition(&shown)?;
+            (last > i).then_some((card, column.id, last))
         }
         Direction::Left | Direction::Right => {
             let next = match direction {
