@@ -82,7 +82,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             row![space::horizontal(), toggle("«")],
             scrollable(list.spacing(12)).height(Fill),
             footer,
-            button("Import Board…")
+            // 13px with the footer's other occasional links; "+ New Board" stays full size.
+            button(text("Import Board…").size(13))
                 .style(button::text)
                 .on_press(Message::ImportBoard),
             crate::chrome::footer(app),
