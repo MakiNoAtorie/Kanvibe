@@ -1677,6 +1677,14 @@ impl App {
             .align_x(Center)
             .into(),
         };
+        // First run: the app's name above the one thing to do.
+        let content: Element<_> = match self.data.boards.is_empty() {
+            true => column![text("Kanvibe").size(28).font(HEADING), content]
+                .spacing(12)
+                .align_x(Center)
+                .into(),
+            false => content,
+        };
         center(content).into()
     }
 }
