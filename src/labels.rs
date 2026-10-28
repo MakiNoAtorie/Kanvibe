@@ -358,7 +358,7 @@ impl App {
         dialog(container(body).width(360))
     }
 
-    /// One row per Label of `board`: a checkbox that sends `toggle(id)`. With `editing` there is
+    /// One row per Label of `board`: its colour dot and a checkbox that sends `toggle(id)`. With `editing` there is
     /// also a pencil per Label opening its rename / recolour / delete editor. The Filter reuses
     /// this with `None`.
     pub(crate) fn picker_rows<'a>(
@@ -370,12 +370,19 @@ impl App {
     ) -> Element<'a, Message> {
         let rows = board.labels.iter().map(|label| {
             let id = label.id;
+            // A colour dot, not a chip: the checkbox already shows the full name.
+            let color = swatch(&label.color);
+            let dot = container(space().width(12).height(12)).style(move |_| container::Style {
+                background: Some(color.into()),
+                border: Border::default().rounded(6),
+                ..Default::default()
+            });
             let mut line = row![
+                dot,
                 checkbox(checked.contains(&id))
                     .label(label.name.as_str())
                     .on_toggle(move |_| toggle(id)),
                 space::horizontal(),
-                chip(label),
             ]
             .spacing(8)
             .align_y(Center);
