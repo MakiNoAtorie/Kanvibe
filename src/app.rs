@@ -2062,24 +2062,29 @@ impl App {
     /// `None` while a save is in flight: its `Saved` result runs this again, so changes made
     /// meanwhile merge into one save of the latest state.
     pub fn save_if_changed(&mut self) -> Option<SaveJob> {
-        let dir = self.data_dir.clone()?;
+        let dir = self.data_dir.as_ref()?;
         if self.writing.is_some() || self.editing.as_ref().is_some_and(|e| e.typed_at.is_some()) {
             return None; // live text waits for the idle write (`EditTick`)
         }
-        let state = (self.data.clone(), self.settings());
-        if self.same(&state, &self.saved) {
+        // Compared in place: this runs after every message (drag moves, ticks, resizes), so the
+        // state is cloned only once a save is going to happen.
+        let settings = self.settings();
+        let now = (&self.data, &settings);
+        if self.same(now, (&self.saved.0, &self.saved.1)) {
             self.not_saved = None; // e.g. undone back to what the file holds
             return None;
         }
-        if self.failed.as_ref().is_some_and(|f| self.same(f, &state)) {
+        if (self.failed.as_ref()).is_some_and(|(d, s)| self.same((d, s), now)) {
             return None; // wait for a change or the retry timer
         }
+        let dir = dir.clone();
         // ponytail: rotation runs here on the UI thread (a file copy, at most once per session or
         // per 24 h, never while a write is in flight); move it into `SaveJob::run` if it ever stalls.
-        let changed = self.saved.0 != state.0;
+        let changed = self.saved.0 != self.data;
         if let Err(e) = storage::rotate(&dir, &mut self.rotation, changed) {
             eprintln!("Backups not rotated: {e}");
         }
+        let state = (self.data.clone(), settings);
         self.writing = Some(state.clone());
         let (data, settings) = state;
         Some(SaveJob {
@@ -2092,7 +2097,10 @@ impl App {
     /// Exits once a requested close has nothing left to save and no save in flight;
     /// otherwise the next `save_if_changed` starts the save and its `Saved` comes back here.
     fn exit_if_saved(&mut self) -> Task<Message> {
-        let clean = self.same(&self.saved, &(self.data.clone(), self.settings()));
+        let clean = self.same(
+            (&self.saved.0, &self.saved.1),
+            (&self.data, &self.settings()),
+        );
         if self.closing != Closing::Waiting || self.writing.is_some() || !clean {
             return Task::none();
         }
@@ -2102,7 +2110,7 @@ impl App {
 
     /// Whether two saved states match. The window is ignored (geometry never triggers a save on
     /// its own) except while closing, when it is saved too.
-    fn same(&self, a: &(Data, Settings), b: &(Data, Settings)) -> bool {
+    fn same(&self, a: (&Data, &Settings), b: (&Data, &Settings)) -> bool {
         if self.closing != Closing::No {
             return a == b;
         }
@@ -2111,7 +2119,7 @@ impl App {
             maximized: false,
             ..s.clone()
         };
-        a.0 == b.0 && bare(&a.1) == bare(&b.1)
+        a.0 == b.0 && bare(a.1) == bare(b.1)
     }
 
     /// The settings saved beside the Boards.
