@@ -494,17 +494,46 @@ fn ctrl_up_and_down_reorder_the_card_within_its_column() {
 }
 
 #[test]
-fn ctrl_arrows_do_nothing_without_a_selected_card() {
+fn ctrl_up_and_down_do_nothing_without_a_selected_card() {
     let mut app = app_with_cards();
     app.selection = selected(&app, 0, None);
 
     send(
         &mut app,
-        [key(Named::ArrowRight, true), key(Named::ArrowDown, true)],
+        [key(Named::ArrowUp, true), key(Named::ArrowDown, true)],
     );
 
     assert_eq!(card_titles(&app, 0), ["A", "B", "C"]);
     assert_eq!(app.selection, selected(&app, 0, None));
+}
+
+#[test]
+fn ctrl_left_and_right_move_the_selected_column_when_no_card_is_selected() {
+    let mut app = app_with_cards();
+    let to_do = column_id(&app, 0);
+    app.selection = selected(&app, 0, None);
+
+    send(&mut app, [key(Named::ArrowLeft, true)]); // first Column: no-op, no step
+    assert_eq!(column_names(&app), ["To do", "Doing", "Done"]);
+
+    send(&mut app, [key(Named::ArrowRight, true)]);
+    assert_eq!(column_names(&app), ["Doing", "To do", "Done"]);
+    let on_to_do = Some(Selection {
+        column: to_do,
+        card: None,
+    });
+    assert_eq!(app.selection, on_to_do);
+
+    send(&mut app, [key(Named::ArrowRight, true)]);
+    send(&mut app, [key(Named::ArrowRight, true)]); // last Column: no-op, no step
+    assert_eq!(column_names(&app), ["Doing", "Done", "To do"]);
+    assert_eq!(app.selection, on_to_do);
+
+    send(&mut app, [ctrl("z", false)]); // one step per move
+    assert_eq!(column_names(&app), ["Doing", "To do", "Done"]);
+    send(&mut app, [ctrl("z", false)]);
+    assert_eq!(column_names(&app), ["To do", "Doing", "Done"]);
+    assert_eq!(card_titles(&app, 0), ["A", "B", "C"]); // the Cards are still there
 }
 
 #[test]

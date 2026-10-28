@@ -234,7 +234,8 @@ pub enum Message {
     Select(Selection),
     /// An arrow key: select the neighbouring Card or Column.
     MoveSelection(Direction),
-    /// Ctrl+arrow: move the selected Card to the neighbouring Column, or up/down within its own.
+    /// Ctrl+arrow: move the selected Card to the neighbouring Column, or up/down within its own;
+    /// with a Column selected and no Card, Ctrl+Left/Right moves the Column one place.
     MoveCard(Direction),
     /// N: open the Capture box in the selected Column, else the first.
     NewCard,
@@ -677,6 +678,12 @@ impl App {
             }
             Message::MoveCard(direction) => {
                 self.commit_pending();
+                if let Some(gap) = self.column_move(direction) {
+                    let column = self.selection.expect("a selected Column").column;
+                    self.data.move_column(column, gap);
+                    self.record_step(self.current_board);
+                    return self.reveal_selection();
+                }
                 let target = self.board().zip(self.selection);
                 let shown = |card: &Card| self.shown(card);
                 if let Some((card, column, index)) = target
@@ -1203,6 +1210,19 @@ impl App {
         if change(&mut self.data).is_some() {
             self.data.touch(card);
             self.record_step(self.data.board_of_card(card));
+        }
+    }
+
+    /// The gap Ctrl+Left/Right moves the selected Column to, when the Selection is a Column with
+    /// no Card; `None` otherwise or at the first/last Column.
+    fn column_move(&self, direction: Direction) -> Option<usize> {
+        let selection = self.selection.filter(|s| s.card.is_none())?;
+        let columns = &self.board()?.columns;
+        let at = columns.iter().position(|c| c.id == selection.column)?;
+        match direction {
+            Direction::Left => at.checked_sub(1),
+            Direction::Right => (at + 1 < columns.len()).then_some(at + 2),
+            _ => None,
         }
     }
 

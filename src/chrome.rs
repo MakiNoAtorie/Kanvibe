@@ -15,6 +15,10 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("N", "New Card in the selected Column"),
     ("Arrow keys", "Move the selection"),
     ("Ctrl+Arrow keys", "Move the selected Card"),
+    (
+        "Ctrl+Left / Ctrl+Right",
+        "Move the selected Column (when no Card is selected)",
+    ),
     ("Home / End", "Select the first / last Card in the Column"),
     (
         "Ctrl+Home / Ctrl+End",
