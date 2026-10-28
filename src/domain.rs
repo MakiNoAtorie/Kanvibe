@@ -102,6 +102,9 @@ pub struct Card {
     /// Markdown (ADR 0003); empty when the Card has none.
     #[serde(default)]
     pub description: String,
+    /// Absolute paths of files on this machine, as the Open dialog gave them; never copied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
 }
 
 /// A Checklist Item. Edits target it by `id`, never by position.
@@ -323,6 +326,7 @@ impl Data {
             checklist: Vec::new(),
             labels: Vec::new(),
             description: String::new(),
+            files: Vec::new(),
         });
         Some(id)
     }

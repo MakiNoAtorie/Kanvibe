@@ -84,6 +84,7 @@ fn data(boards: usize, cards: usize) -> Data {
                         ),
                         _ => String::new(),
                     },
+                    files: Vec::new(),
                 };
                 columns[i % 3].cards.push(card);
             }
