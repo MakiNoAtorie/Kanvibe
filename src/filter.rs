@@ -117,14 +117,22 @@ impl App {
     /// The Board header's filter controls: the text box with ×, and the Labels button.
     /// `width` is the text box's: 220 px, or `Fill` on its own line in a narrow Board.
     pub(crate) fn filter_bar(&self, width: iced::Length) -> Element<'_, Message> {
-        let clear = self.filter.is_on().then(|| {
-            crate::chrome::tip(
-                button("×")
-                    .style(button::text)
-                    .on_press(Message::ClearFilter),
-                "Clear filter",
-            )
-        });
+        // Always laid out (invisible and inert while the Filter is off), so the text box
+        // doesn't shift when typing starts.
+        let on = self.filter.is_on();
+        let clear = button("×")
+            .style(move |theme, status| match on {
+                true => button::text(theme, status),
+                false => button::Style {
+                    text_color: iced::Color::TRANSPARENT,
+                    ..button::Style::default()
+                },
+            })
+            .on_press_maybe(on.then_some(Message::ClearFilter));
+        let clear = match on {
+            true => crate::chrome::tip(clear, "Clear filter"),
+            false => clear.into(),
+        };
         let labels = match self.filter.labels.len() {
             0 => "Labels".to_string(),
             n => format!("Labels ({n})"),
@@ -137,7 +145,7 @@ impl App {
                 .on_submit(Message::SubmitFilter),
             "Filter (Ctrl+F)"
         )]
-        .extend(clear)
+        .push(clear)
         .push(
             button(text(labels).wrapping(text::Wrapping::None))
                 .style(crate::app::quiet)
