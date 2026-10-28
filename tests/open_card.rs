@@ -1,6 +1,6 @@
 //! Seam 1 for the open Card (v2 item 9): open/close/follow, title edit, timestamps.
 use iced::keyboard::{self, Key, Modifiers, key::Named};
-use kanvibe::app::{App, Direction, Field, Message, Selection};
+use kanvibe::app::{App, Direction, Field, Message, Part, Selection};
 use kanvibe::domain::Id;
 use kanvibe::keys::{self, Context};
 
@@ -530,4 +530,66 @@ fn f2_e_l_and_m_act_on_the_open_or_selected_card() {
     send(&mut app, [Message::Escape, Message::OpenMove]);
     assert_eq!(app.move_picker, Some(b));
     assert_eq!(app.open_card(), Some(b), "the picker leaves the Card open");
+}
+
+#[test]
+fn keys_inside_the_open_card_move_between_its_parts_f2_edits_and_enter_closes() {
+    let mut app = app_with_cards();
+    open(&mut app, "B");
+    let b = card(&app, "B");
+    send(
+        &mut app,
+        [
+            Message::AddItem(b),
+            Message::EditChanged("Step".into()),
+            Message::CommitEdit,
+        ],
+    );
+    let item = app.data.card(b).unwrap().checklist[0].id;
+    send(&mut app, [Message::OpenCard]); // reopen: the highlight starts on the title
+    let key = |app: &mut App, key| send(app, [Message::KeyWithFocus(press(key), None)]);
+
+    for (k, part) in [
+        (Named::ArrowDown, Part::Labels),
+        (Named::ArrowDown, Part::Description),
+        (Named::ArrowDown, Part::Item(item)),
+        (Named::ArrowLeft, Part::Item(item)),
+        (Named::ArrowRight, Part::Item(item)),
+        (Named::ArrowUp, Part::Description),
+        (Named::End, Part::Due),
+        (Named::ArrowDown, Part::Due),
+        (Named::Home, Part::Title),
+    ] {
+        key(&mut app, k);
+        assert_eq!(app.part, part, "after {k:?}");
+        assert_eq!(app.open_card(), Some(b), "{k:?} stays in the Card");
+    }
+
+    for _ in 0..3 {
+        key(&mut app, Named::ArrowDown);
+    }
+    key(&mut app, Named::F2);
+    let editing = app.editing.as_ref().map(|e| e.field);
+    assert_eq!(editing, Some(Field::ChecklistItem(item)));
+    send(
+        &mut app,
+        [Message::EditChanged("Step 1".into()), Message::CommitEdit],
+    );
+    assert_eq!(app.data.name(item), Some("Step 1"));
+
+    key(&mut app, Named::End);
+    key(&mut app, Named::F2);
+    assert_eq!(app.editing.as_ref().map(|e| e.field), Some(Field::Due(b)));
+    send(
+        &mut app,
+        [
+            Message::EditChanged("2026-11-02".into()),
+            Message::CommitEdit,
+        ],
+    );
+
+    key(&mut app, Named::Enter);
+    assert_eq!(app.open_card(), None, "Enter closes the Card");
+    assert_eq!(app.selection.and_then(|s| s.card), Some(b));
+    assert_eq!(app.data.card(b).unwrap().due.as_deref(), Some("2026-11-02"));
 }

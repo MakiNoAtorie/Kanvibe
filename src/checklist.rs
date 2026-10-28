@@ -2,7 +2,7 @@
 use iced::widget::{button, checkbox, mouse_area, row, text, text_input};
 use iced::{Center, Element, Fill};
 
-use crate::app::{App, Direction, EDIT_INPUT, Field, Message};
+use crate::app::{App, Direction, EDIT_INPUT, Field, Message, Part};
 use crate::chrome::tip;
 use crate::domain::{Card, Item};
 
@@ -14,7 +14,7 @@ impl App {
             None => "Checklist".into(),
         };
         let add = crate::app::small_button("+ Add Checklist Item", Message::AddItem(card.id));
-        let body = items.chain([add.into()]);
+        let body = items.chain([self.part_box(Part::Checklist, add)]);
         crate::app::section(crate::app::section_heading(heading), body)
     }
 
@@ -39,7 +39,7 @@ impl App {
                 .style(button::text)
                 .on_press(message)
         };
-        row![
+        let row = row![
             checkbox(item.done).on_toggle(|_| Message::ToggleItem(item.id)),
             label,
             tip(
@@ -56,7 +56,7 @@ impl App {
             ),
         ]
         .spacing(6)
-        .align_y(Center)
-        .into()
+        .align_y(Center);
+        self.part_box(Part::Item(item.id), row)
     }
 }

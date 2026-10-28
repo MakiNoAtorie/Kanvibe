@@ -78,6 +78,8 @@ pub struct App {
     /// The selected Card is the open Card, expanded in place in its Column. Cleared when the
     /// Selection has no Card; see `validate_ui`.
     pub open: bool,
+    /// The open Card's highlighted part: Up/Down move it, F2 edits it.
+    pub part: Part,
     /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
     pub rotation: storage::Rotation,
     /// The Board whose Archive view replaces its Columns; `None` = the Columns show.
@@ -114,6 +116,30 @@ pub struct App {
 pub struct Selection {
     pub column: Id,
     pub card: Option<Id>,
+}
+
+/// A stop for Up/Down inside the open Card, in the order the Card shows them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Part {
+    #[default]
+    Title,
+    Labels,
+    Description,
+    Item(Id),
+    /// "+ Add Checklist Item".
+    Checklist,
+    Files,
+    Due,
+}
+
+/// The open Card's parts, top to bottom.
+pub fn parts(card: &Card) -> Vec<Part> {
+    let items = card.checklist.iter().map(|i| Part::Item(i.id));
+    [Part::Title, Part::Labels, Part::Description]
+        .into_iter()
+        .chain(items)
+        .chain([Part::Checklist, Part::Files, Part::Due])
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -337,6 +363,10 @@ pub enum Message {
     CloseCard,
     /// Enter or F2: edit the open or selected Card's title.
     EditTitle,
+    /// Up/Down/Home/End in the open Card: highlight another part.
+    MovePart(Direction),
+    /// F2 in the open Card: edit its highlighted part.
+    EditPart,
     /// Del: archive the selected Card.
     ArchiveSelected,
     /// The open Card's "Archive" button.
@@ -587,6 +617,7 @@ impl App {
             }
             Message::OpenCard => {
                 self.commit_pending();
+                self.part = Part::Title;
                 self.open_selected();
                 return self.reveal_selection(); // the whole open Card, footer included
             }
@@ -616,6 +647,33 @@ impl App {
             Message::EditTitle => {
                 if let Some(card) = self.open_selected() {
                     return self.update(Message::StartEdit(Field::CardTitle(card)));
+                }
+            }
+            Message::MovePart(direction) => {
+                if let Some(card) = self.open_card().and_then(|c| self.data.card(c)) {
+                    let parts = parts(card);
+                    let at = parts.iter().position(|p| *p == self.part).unwrap_or(0);
+                    let last = parts.len() - 1;
+                    self.part = parts[match direction {
+                        Direction::Up => at.saturating_sub(1),
+                        Direction::Down => (at + 1).min(last),
+                        Direction::Top => 0,
+                        Direction::Bottom => last,
+                        Direction::Left | Direction::Right => at,
+                    }];
+                }
+            }
+            Message::EditPart => {
+                if let Some(card) = self.open_card() {
+                    return self.update(match self.part {
+                        Part::Title => Message::EditTitle,
+                        Part::Labels => Message::OpenLabels,
+                        Part::Description => Message::EditDescription,
+                        Part::Item(item) => Message::StartEdit(Field::ChecklistItem(item)),
+                        Part::Checklist => Message::AddItem(card),
+                        Part::Files => Message::AddFile(card),
+                        Part::Due => Message::StartEdit(Field::Due(card)),
+                    });
                 }
             }
             Message::ArchiveSelected => {
@@ -804,6 +862,15 @@ impl App {
                 let focused = focused.and_then(input);
                 let dragging = self.drag.is_some();
                 let message = keys::map(&event, &Context { focused, dragging });
+                // Inside the open Card the arrows, Enter and F2 act on its parts, not the Board.
+                let message = match message {
+                    Some(m) if self.open_card().is_none() => Some(m),
+                    Some(Message::MoveSelection(Direction::Left | Direction::Right)) => None,
+                    Some(Message::MoveSelection(direction)) => Some(Message::MovePart(direction)),
+                    Some(Message::OpenCard) => Some(Message::CloseCard),
+                    Some(Message::EditTitle) => Some(Message::EditPart),
+                    m => m,
+                };
                 // A dialog leaves only Esc; the Archive view also Undo/Redo and F1.
                 let allowed = |m: &Message| match m {
                     Message::Escape => true,
@@ -843,6 +910,13 @@ impl App {
                         start,
                         typed_at: None,
                     });
+                    self.part = match field {
+                        Field::CardTitle(_) => Part::Title,
+                        Field::Description(_) => Part::Description,
+                        Field::ChecklistItem(item) => Part::Item(item),
+                        Field::Due(_) => Part::Due,
+                        _ => self.part,
+                    };
                     // A Card's title and description are edited in the open Card: select and
                     // open it, so it shows and is in view.
                     if let Field::CardTitle(card) | Field::Description(card) = field
@@ -874,7 +948,12 @@ impl App {
                     edit.typed_at = Some(Instant::now());
                 }
             }
-            Message::CommitEdit => _ = self.commit_pending(),
+            Message::CommitEdit => {
+                self.commit_pending();
+                // The Due box stays on screen: let go of it, so the next Enter closes the Card.
+                // Focusing an Id no widget has unfocuses every widget.
+                return operation::focus("none");
+            }
             Message::DueChanged(card, text) => {
                 if self.editing.as_ref().map(|e| e.field) != Some(Field::Due(card)) {
                     // Drop StartEdit's focus task: refocusing the typed-in box moves its cursor
@@ -1418,6 +1497,11 @@ impl App {
         self.validate_filter();
         self.validate_move();
         self.open &= self.open_card().is_some();
+        if let Part::Item(item) = self.part
+            && self.data.item(item).is_none()
+        {
+            self.part = Part::Checklist; // a blank Item left on Enter is removed
+        }
     }
 
     /// The Card is an active Card of the current Board.
@@ -2033,6 +2117,7 @@ impl App {
             )
         ]
         .spacing(8);
+        let header = self.part_box(Part::Title, header);
         let actions = row![
             crate::chrome::tip(
                 small_button("Move to Board…", Message::OpenMove),
@@ -2062,11 +2147,11 @@ impl App {
             column![
                 header,
                 widget::rule::horizontal(1),
-                self.view_labels(card),
-                self.view_description(card),
+                self.part_box(Part::Labels, self.view_labels(card)),
+                self.part_box(Part::Description, self.view_description(card)),
                 self.view_checklist(card),
-                self.view_files(card),
-                self.view_due(card),
+                self.part_box(Part::Files, self.view_files(card)),
+                self.part_box(Part::Due, self.view_due(card)),
                 widget::rule::horizontal(1),
                 column![actions, times].spacing(6),
             ]
@@ -2074,6 +2159,18 @@ impl App {
         )
         .width(Fill)
         .padding([9, 11])
+    }
+
+    /// A part of the open Card, tinted while it is the highlighted one.
+    pub(crate) fn part_box<'a>(
+        &self,
+        part: Part,
+        content: impl Into<Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        container(content)
+            .padding([2, 4])
+            .style(header_tint(self.part == part))
+            .into()
     }
 }
 

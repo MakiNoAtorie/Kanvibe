@@ -24,8 +24,18 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
         "Move the selected Card to the top / bottom",
     ),
     ("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous Board"),
-    ("Enter", "Open the selected Card (or double-click it)"),
-    ("F2", "Rename the open or selected Card"),
+    (
+        "Enter",
+        "Open the selected Card (or double-click it); again to close it",
+    ),
+    (
+        "Up / Down",
+        "In the open Card: highlight the next / previous part",
+    ),
+    (
+        "F2",
+        "Rename the selected Card; in the open Card, edit the highlighted part",
+    ),
     (
         "Tab / Shift+Tab",
         "Between a Card's title and its description",
