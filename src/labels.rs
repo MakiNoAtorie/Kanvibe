@@ -2,7 +2,7 @@
 use iced::widget::{
     button, checkbox, column, container, operation, row, scrollable, space, text, text_input,
 };
-use iced::{Border, Center, Color, Element, Fill, Task};
+use iced::{Border, Center, Color, Element, Task};
 
 use crate::app::{App, Confirm, EDIT_INPUT, Field, Message, dialog, dialog_header};
 use crate::domain::{Board, Card, Data, Id, Label, cards, now};
@@ -352,9 +352,10 @@ impl App {
         };
         let header = dialog_header("Labels", Message::CloseLabels);
         let rows = self.picker_rows(board, &card.labels, Message::ToggleLabel, Some(picker));
-        let list = scrollable(rows).height(Fill);
+        // The list scrolls past 360px; the dialog wraps its content instead of filling the window.
+        let list = container(scrollable(rows)).max_height(360);
         let body = column![header, list, self.new_label_form(board, picker)].spacing(12);
-        dialog(container(body).width(360).max_height(520))
+        dialog(container(body).width(360))
     }
 
     /// One row per Label of `board`: a checkbox that sends `toggle(id)`. With `editing` there is
