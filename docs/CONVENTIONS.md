@@ -49,15 +49,16 @@
 - iced: no `push_maybe`; use `column![..].extend(option)` and `.chain([...])`.
 
 ## Saving (#21)
-- `App::save_if_changed() -> Option<SaveJob>` runs after every `update` and never writes; it returns `None` while a pending edit has unwritten keystrokes or a write is in flight. `SaveJob::run(self) -> Message::Saved(Result<(), String>)` is the one place a save happens (backup rotation hooks there or in `storage::save`). `Screen::update` runs jobs on a `std::thread`.
-- App fields: `writing`, `failed` (held from retry until a change or `RetrySave`), `not_saved` (bar text, built by `fn not_saved(path, io::Error)`), `closing: Closing::{No, Waiting, Asking, Exiting}`.
+- `App::save_if_changed() -> Option<SaveJob>` runs after every `update` and never writes; it returns `None` while a pending edit has unwritten keystrokes or a write is in flight. It compares `(&Data, &Settings)` in place and clones `Data` only once a save will happen (a clone is ~4 ms at 5k Cards; never clone on a per-message path). `SaveJob::run(self) -> Message::Saved(Result<(), String>, storage::Rotation)` is the one place a save happens: it rotates the backups if due, then writes. `Screen::update` runs jobs on a `std::thread`.
+- App fields: `writing: Option<Arc<(Data, Settings)>>` (shared with the `SaveJob`; the `Saved` arm takes it back with `Arc::try_unwrap`), `failed` (held from retry until a change or `RetrySave`), `not_saved` (bar text, built by `fn not_saved(path, io::Error)`), `closing: Closing::{No, Waiting, Asking, Exiting}`.
 - Messages `Saved`, `RetrySave` (10 s timer + Retry button), `SaveCopy`, `CopySaved(Option<Result<(), String>>)` (`None` = dialog cancelled), `QuitWithoutSaving`. Save-result arms (`Saved`, `RetrySave`, `CopySaved`) must not call `commit_pending`; arms that change domain data or UI context call it first.
 - Settings for a save come from private `App::settings()`; theme, sidebar, window go there.
 - Overlays: `stack![content, opaque(center(panel).style(dim))]`, as in `view_close_dialog`.
 - Storage tests: `send` runs `while let Some(job) = app.save_if_changed() { app.update(job.run()) }`; `send_while_writing` holds a job; `block_saves(dir)` (a folder named `kanvibe.json.tmp`) forces a failure.
 
 ## Backup rotation (#20)
-- `storage::rotate(dir, &mut rotation, data_changed)` runs in `save_if_changed` right before a `SaveJob` is created (UI thread, never while a write is in flight). `App.rotation: storage::Rotation::{Due, Done, Off}`; `data_changed` = `saved.0 != data` (settings-only changes don't count).
+- `storage::rotate(dir, &mut rotation, data_changed)` runs in `SaveJob::run` right before `storage::save` (writer thread, never while another write is in flight); the job carries `App.rotation` in and `Message::Saved(.., rotation)` hands the new state back, so `App.rotation` changes only at `App::open`, startup Restore/Start empty, or `Saved`. `App.rotation: storage::Rotation::{Due, Done, Off}`; `data_changed` = `saved.0 != data` (settings-only changes don't count), computed only while `Due`.
+- `.bak1` moves to `.bak2` only when it parses; an unreadable `.bak1` is just replaced, so a broken backup never pushes a readable one out.
 - `Rotation::Off` disables rotation and the 24 h rule for the session; set it when a file didn't load cleanly (startup Restore/Start empty; #22 load repair sets it in `App::open`). A failed rotation stays `Due`.
 - `.bak1` is written with `write_all` + `sync_all`, not `fs::copy` (which keeps the source mtime on Windows).
 - Storage test helpers: `saved_sample(dir)`, `create_board(app, name)`, `backups(dir)`, `read(dir, name)`, `age(dir, name, hours)`. Compare file contents as strings, not bytes.
@@ -159,7 +160,7 @@
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
 - Every `update` arm that changes domain data calls `self.history.record(&self.data.boards, show_undo, show_redo)` after. `record` skips unchanged state, so calling it after a no-op is safe. Board-level actions pass `None, None`; Card actions pass the Card's Board for both; a cross-Board move passes source then target.
-- Undo/redo replace `data.boards` only; `next_id` and UI state are never restored.
+- `History::undo/redo(&mut boards) -> Option<Option<Id>>` restore in place, keeping every current Board that equals its snapshot and cloning only the changed ones; `next_id` and UI state are never restored.
 
 ## Storage (`src/storage.rs`)
 - `storage::{data_dir(args), open(dir), load(dir), save(dir, &Data, &Settings)}`; see Startup and Load repair for return types.
@@ -175,10 +176,24 @@
 
 ## Checks
 - Local CI is `ci.bat` (fmt --check, clippy -D warnings, tests); no hosted CI. Run it before every push and merge.
-- `cargo test --offline -q` and `cargo clippy --offline --all-targets -- -D warnings`; `cargo fmt` before committing.
+- `cargo test --offline -q` and `cargo clippy --offline --all-targets -- -D warnings`; `cargo fmt` before committing. Use `--no-fail-fast` when hunting, or cargo stops at the first failing test binary.
+- Perf harness: `cargo test --release --test perf -- --ignored --nocapture` (`tests/perf.rs`, ignored tests, release build). Run it before and after any change to update, save, view or history and put the numbers in the commit body. Bars used so far: under 1 ms per message and under 5 ms per view at 5k Cards is fine. "View + warm layout" is the per-frame cost to watch; the simulator row is a cold layout (startup or Board switch). Delete `target\release` afterwards (disk).
+
+## After the review passes (debug, UX, UI, performance)
+- `validate_ui` also drops `column_menu` / `limit_input` whose Column isn't on the current Board (undo/redo can remove Columns); any new per-Column UI state needs the same check. Anything that hides the Columns view (the Archive view) also clears `board_menu` and `filter_menu`: hidden state still takes an Esc.
+- Every arm that changes `current_board` (CreateBoard included) calls `commit_pending()` before the switch. `Data::fallback(None, …)` returns the first active Board: `current_board` is `None` only when no Board is active. `ArchiveBoard` expands the sidebar's Archived section; `RestoreBoard` opens the restored Board.
+- The Archive-view key gate passes Esc, Undo, Redo and F1; add any new global shortcut there too. `StartEdit` closes both the Board menu and the Column menu.
+- `WindowState` ignores maximised answers while minimised (0×0 size or parked position); treat a minimised report as carrying no information. `WindowState::size()` is the last reported size; `App::board_width()` (window less sidebar less panel) drives width-dependent layout: below `NARROW` (640) the filter bar gets its own line.
+- `App::open_panel()` shows the selected Card in the panel (else keeps the open one) and returns it; the panel-scoped keys (Enter, F2, E, L) go through it.
+- `Filter::matches(card, labels)` takes the Board's Labels: the text also matches Label names. Capture box paste: `CapturePasted(String)` → `clipboard::read()` → `CaptureLines(Option<String>)`, one Card per non-blank line as one step. `commit_pending` stores a whitespace-only description as `""`; `description.is_empty()` is the one "no description" rule.
+- `LimitInput { column, text, refused }`: `refused` shows the reason line until the text changes. `Column::limit_tip()` is the count's tooltip; `app::count_badge(label, over)` draws the count in the Board view and the image export alike. `chrome::tip` takes `impl text::IntoFragment`.
+- `board_name_input(name)` returns a Row (text box + Create, disabled while blank); set its width on the row. `Screen::title()` builds the window title. Label tests that need an unattached Label use `new_free_label`.
+- Styles: `app::quiet` is the secondary button style (no `button::secondary`; primary only for a view's or dialog's one main action). `app::HEADING` (semibold) for Board and Column names and panel section headings, not Card titles; the image export uses it too. Scrollables use `app::scrollbar(width)` (embedded, 4 px spacing) so they never cover content. Tooltips and `clipped` use `bordered_box`. Close/remove glyph is "✕" everywhere; Checklist progress is "✓ n/m". `text::secondary` is for muted context, not headings or 12 px text in light theme.
+- Dialogs with a `space::horizontal()` (right-aligned buttons, `dialog_header`) need a fixed `width`, not `max_width`, or they stretch to the window. Controls that appear and disappear in a row keep their slot (transparent and inert when off) so neighbours don't shift. Drop indicators stay always laid out.
 
 ## Windows tooling gotchas
 - In worktrees, Bash heredocs and multi-step git commands may be refused by the isolation check; use Write/Edit and simple git commands.
 - PowerShell 5.1: `git commit -F -` with a here-string breaks; write the message to a file and use `-F <file>`.
 - Disk: build only in the worktree's own `target/` and delete it when done. Never share a `CARGO_TARGET_DIR` across worktrees: the `kanvibe` output file name is identical, so one worktree tests another's code.
 - Long worktree paths can hit MAX_PATH (LNK1104) on release builds; use a shorter `--target-dir`.
+- Read all of `ci.bat`'s output (`$out = .\ci.bat 2>&1 | Out-String`, then filter). Piping it into `Select-Object -First N` closes the pipe early and kills the batch mid-run with exit 255.
