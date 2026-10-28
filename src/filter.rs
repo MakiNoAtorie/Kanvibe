@@ -66,7 +66,10 @@ impl App {
     pub(crate) fn update_filter(&mut self, message: Message) -> Task<Message> {
         if message == Message::LeaveField {
             // Every other text box keeps state that tells it was the one focused.
-            let field_open = self.field_open() || self.label_picker.is_some() || self.shortcuts;
+            let field_open = self.field_open()
+                || self.label_picker.is_some()
+                || self.shortcuts
+                || self.search.is_some();
             return match field_open {
                 true => self.update(Message::Escape),
                 false => Task::none(), // the filter box: it has already unfocused

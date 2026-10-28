@@ -40,6 +40,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
         "Move the Checklist Item being edited",
     ),
     ("Ctrl+F", "Filter the Board (Enter selects the first match)"),
+    ("Ctrl+Shift+F", "Search every Board"),
     ("Ctrl+Z", "Undo"),
     ("Ctrl+Y / Ctrl+Shift+Z", "Redo"),
     ("Esc", "Cancel a drag, close, cancel or deselect"),
