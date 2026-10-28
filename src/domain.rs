@@ -119,7 +119,18 @@ impl Card {
         let done = self.checklist.iter().filter(|i| i.done).count();
         (!self.checklist.is_empty()).then(|| format!("{done}/{}", self.checklist.len()))
     }
+
+    /// Untouched for more than [`STALE_DAYS`] before `now`. An unreadable `updated` is fresh.
+    pub fn is_stale(&self, now: jiff::Timestamp) -> bool {
+        let limit = jiff::SignedDuration::from_hours(24 * STALE_DAYS);
+        self.updated
+            .parse::<jiff::Timestamp>()
+            .is_ok_and(|updated| now.duration_since(updated) > limit)
+    }
 }
+
+/// Days without a change after which a Card fades (ageing).
+pub const STALE_DAYS: i64 = 14;
 
 fn archived(mut card: Card, column_id: Id) -> Archived {
     let archived_at = now();
@@ -348,22 +359,25 @@ impl Data {
         Some(id)
     }
 
-    /// Moves a Card to `index` in a Column (clamped to its end). Unknown Card or Column: nothing.
+    /// Moves a Card to `index` in a Column (clamped to its end), touching it unless it stays
+    /// where it was. Unknown Card or Column: nothing.
     pub fn move_card(&mut self, card: Id, column: Id, index: usize) {
         let (Some((fb, fc)), Some((tb, tc))) =
             (self.holding(card), self.column_where(|c| c.id == column))
         else {
             return;
         };
-        let new_column = (fb, fc) != (tb, tc);
+        let same_column = (fb, fc) == (tb, tc);
         let from = &mut self.boards[fb].columns[fc].cards;
         let at = from.iter().position(|x| x.id == card).expect("found above");
         let mut moving = from.remove(at);
-        if new_column {
-            moving.updated = now(); // its Column changed; reordering alone is not its own change
-        }
         let to = &mut self.boards[tb].columns[tc].cards;
-        to.insert(index.min(to.len()), moving);
+        let index = index.min(to.len());
+        // Moving is a change to the Card (ageing); staying put is not. Neighbours shifting isn't.
+        if !(same_column && index == at) {
+            moving.updated = now();
+        }
+        to.insert(index, moving);
     }
 
     /// Moves an active Card to the bottom of another active Board's first Column (a "To do"

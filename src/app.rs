@@ -1569,8 +1569,9 @@ impl App {
             drag::target(mouse_area(line), Target::ColumnGap(i), dragged).into()
         };
         let mut columns: Vec<Element<_>> = Vec::new();
+        let now = jiff::Timestamp::now(); // ageing: one clock read per view
         for (i, c) in board.columns.iter().enumerate() {
-            columns.extend([gap(i), self.view_column(c)]);
+            columns.extend([gap(i), self.view_column(c, now)]);
         }
         columns.extend([
             gap(board.columns.len()),
@@ -1673,7 +1674,7 @@ impl App {
         size.width - sidebar as f32
     }
 
-    fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
+    fn view_column<'a>(&'a self, col: &'a Column, now: jiff::Timestamp) -> Element<'a, Message> {
         let selection = self.selection.filter(|s| s.column == col.id);
         // Only a Card drag registers Card slots and Column bodies; Column drags use gaps.
         let dragging = matches!(self.drag.as_ref().map(|d| d.item), Some(Item::Card(_)));
@@ -1686,10 +1687,10 @@ impl App {
         // Hidden Cards are skipped but keep their index: drop slots are positions in all Cards.
         let shown = col.cards.iter().enumerate().filter(|(_, c)| self.shown(c));
         let cards = shown.map(|(i, card)| {
-            let outline = outlined(
-                card_style,
-                selection.is_some_and(|s| s.card == Some(card.id)),
-            );
+            let selected = selection.is_some_and(|s| s.card == Some(card.id));
+            let outline = outlined(card_style, selected);
+            // The selected Card (the open one included) never fades.
+            let stale = !selected && card.is_stale(now);
             // The Card being dragged stays in place, its text faded under the ghost.
             let lifted = self
                 .drag
@@ -1710,7 +1711,7 @@ impl App {
                 false => card_face(self.board(), card, title),
             };
             let card_box = card_box.id(card_widget(card.id)).style(move |theme| {
-                let style = outline(theme);
+                let style = aged(outline(theme), stale);
                 match lifted {
                     true => container::Style {
                         text_color: style.text_color.map(|c| c.scale_alpha(0.4)),
@@ -2195,6 +2196,21 @@ pub(crate) fn faded(alpha: f32) -> impl Fn(&Theme, button::Status) -> button::St
             },
             _ => style,
         }
+    }
+}
+
+/// Text alpha on a stale Card's face (ageing).
+pub(crate) const STALE_ALPHA: f32 = 0.55;
+
+/// A Card's `style` with its face text at [`STALE_ALPHA`] when `stale` (ageing).
+/// Shared by the Board view and the image export.
+pub(crate) fn aged(style: container::Style, stale: bool) -> container::Style {
+    match stale {
+        true => container::Style {
+            text_color: style.text_color.map(|c| c.scale_alpha(STALE_ALPHA)),
+            ..style
+        },
+        false => style,
     }
 }
 

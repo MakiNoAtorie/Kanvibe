@@ -9,7 +9,7 @@ use iced::{Element, Fill, Padding, Task, Theme};
 
 use crate::app::{
     App, BOARD_TITLE_SIZE, CARD_GAP, CARD_TITLE_SIZE, COLUMN_GAP, COLUMN_NAME_SIZE, COLUMN_WIDTH,
-    HEADING, Message, card_face, card_style, column_style, count_badge,
+    HEADING, Message, aged, card_face, card_style, column_style, count_badge,
 };
 use crate::domain::Board;
 use crate::filter::Filter;
@@ -94,6 +94,7 @@ pub fn render(board: &Board, filter: &Filter, theme: &Theme) -> Result<Vec<u8>, 
 /// The export view: Board name, then every Column with the Cards the Filter matches.
 /// Bottom padding is left off (the crop adds it back), so an overflow reaches the last row.
 fn view(s: &Snapshot) -> Element<'_, Message> {
+    let now = jiff::Timestamp::now();
     let columns = s.board.columns.iter().map(|col| {
         let shown = |c: &_| s.filter.matches(c, &s.board.labels);
         let count = count_badge(s.filter.count_label(col, shown), col.over_limit());
@@ -107,12 +108,13 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
             .iter()
             .filter(|c| s.filter.matches(c, &s.board.labels));
         let cards = cards.map(|c| {
+            let stale = c.is_stale(now); // no selection here: stale simply fades
             card_face(
                 Some(&s.board),
                 c,
                 text(&c.title).size(CARD_TITLE_SIZE).width(Fill).into(),
             )
-            .style(card_style)
+            .style(move |theme| aged(card_style(theme), stale))
             .into()
         });
         let cards = column(cards).spacing(CARD_GAP);

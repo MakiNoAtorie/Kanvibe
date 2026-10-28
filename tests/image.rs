@@ -107,6 +107,22 @@ fn the_image_applies_the_filter_strictly() {
 }
 
 #[test]
+fn a_stale_card_renders_at_the_same_size_with_its_text_faded() {
+    let fresh = app_with(1, &["Write the quarterly report"]);
+    let mut stale = app_with(1, &["Write the quarterly report"]);
+    stale.data.boards[0].columns[0].cards[0].updated = "2020-01-01T00:00:00Z".into();
+    let png = |app: &App| decode(&render(board(app), &Filter::default(), &Theme::Light).unwrap());
+    let ((fw, fh, fresh), (sw, sh, stale)) = (png(&fresh), png(&stale));
+    assert_eq!((sw, sh), (fw, fh));
+    // Board and Column names are drawn alike; only the Card's text loses its dark pixels.
+    let dark = |rows: &[Vec<u8>]| {
+        let pixels = rows.iter().flat_map(|r| r.as_chunks::<4>().0.to_vec());
+        pixels.filter(|p| p[0] < 100).count()
+    };
+    assert!(dark(&stale) < dark(&fresh));
+}
+
+#[test]
 fn the_menu_item_reads_saving_image_while_it_runs() {
     let mut app = app_with(3, &["A"]);
     let id = board(&app).id;
