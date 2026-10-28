@@ -109,10 +109,19 @@ fn gap<'a>(
 /// An active Board's row: its name, highlighted when current; a click opens it.
 /// Kept small so drag and drop can wrap it as a drop target.
 pub fn board_row(board: &Board, current: bool) -> Element<'_, Message> {
-    let style = if current {
-        button::primary
-    } else {
-        button::text
+    // The current Board is marked with the weak primary shade, not a solid fill that would
+    // outshine the Board itself.
+    let style = move |theme: &Theme, status| match current {
+        true => {
+            let pair = theme.extended_palette().primary.weak;
+            button::Style {
+                background: Some(pair.color.into()),
+                text_color: pair.text,
+                border: Border::default().rounded(4),
+                ..button::Style::default()
+            }
+        }
+        false => button::text(theme, status),
     };
     // No `on_press`: the button must not capture the press the drag source needs. A press
     // released under the drag threshold opens the Board (see `Message::DragEnd`).
