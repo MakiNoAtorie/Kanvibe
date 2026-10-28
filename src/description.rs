@@ -87,6 +87,15 @@ impl App {
     /// The panel's description: rendered with an Edit button, or the highlighted editor.
     pub(crate) fn view_description<'a>(&'a self, card: &'a Card) -> Element<'a, Message> {
         let theme = self.theme();
+        // The section heading, with Edit or Done at its right: the button swaps in place.
+        let header = |button| {
+            row![
+                text("Description").size(13).font(crate::app::HEADING),
+                space::horizontal(),
+                button
+            ]
+            .align_y(Center)
+        };
         if self
             .editing
             .as_ref()
@@ -100,10 +109,8 @@ impl App {
                 .font(Font::MONOSPACE)
                 .min_height(160)
                 .highlight("md", self.highlighter_theme());
-            let done = button("Done").on_press(Message::CommitEdit);
-            return column![editor, row![space::horizontal(), done]]
-                .spacing(6)
-                .into();
+            let done: Element<_> = button("Done").on_press(Message::CommitEdit).into();
+            return column![header(done), editor].spacing(6).into();
         }
         let edit = crate::chrome::tip(
             button("Edit")
@@ -115,17 +122,7 @@ impl App {
             true => text("No description").style(text::secondary).into(),
             false => markdown::view(self.rendered.1.items(), &theme).map(Message::OpenLink),
         };
-        column![
-            row![
-                text("Description").size(13).font(crate::app::HEADING),
-                space::horizontal(),
-                edit
-            ]
-            .align_y(Center),
-            body
-        ]
-        .spacing(6)
-        .into()
+        column![header(edit), body].spacing(6).into()
     }
 
     /// Wraps the selection in `markup`, or inserts the markers with the cursor between them.
