@@ -123,9 +123,9 @@ impl App {
         let editing =
             (self.editing.as_ref()).is_some_and(|e| e.field == Field::Description(card.id));
         let edit = match editing {
-            true => button(text("Done").size(crate::app::META_SIZE))
+            true => crate::app::small_button("Done", Message::CommitEdit)
+                .style(button::primary)
                 .padding([2, 8])
-                .on_press(Message::CommitEdit)
                 .into(),
             false => crate::chrome::tip(
                 crate::app::small_button("Edit", Message::EditDescription),
@@ -135,7 +135,7 @@ impl App {
         let body: Element<_> = match card.description.is_empty() {
             _ if editing => self.description_editor(),
             true => text("No description")
-                .size(13)
+                .size(crate::app::SECTION_TEXT_SIZE)
                 .style(text::secondary)
                 .into(),
             false => markdown::view(self.rendered.1.items(), markdown_settings(&theme))

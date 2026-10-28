@@ -236,8 +236,6 @@ fn arrows_and_clicks_on_other_cards_close_the_open_card() {
 fn clicking_a_column_body_closes_the_open_card() {
     let mut app = app_with_cards();
     open(&mut app, "A");
-    send(&mut app, [Message::ClickOutside]);
-    assert_eq!(app.open_card(), Some(card(&app, "A")));
     let doing = app.data.boards[0].columns[1].id;
     send(
         &mut app,
@@ -249,6 +247,27 @@ fn clicking_a_column_body_closes_the_open_card() {
     assert!(!app.open);
     send(&mut app, [Message::MoveSelection(Direction::Left)]);
     assert_eq!(app.open_card(), None, "the next Card shows its face");
+}
+
+#[test]
+fn a_click_on_the_background_closes_the_open_card() {
+    let mut app = app_with_cards();
+    open(&mut app, "A");
+    let a = card(&app, "A");
+    send(&mut app, [Message::StartEdit(Field::CardTitle(a))]);
+    send(&mut app, [Message::ClickOutside]);
+    assert!(app.open, "a rename keeps the Card open");
+    send(&mut app, [Message::Escape, Message::ClickOutside]);
+    assert_eq!(app.open_card(), None);
+    assert!(app.selection.is_some(), "the Card stays selected");
+}
+
+#[test]
+fn an_arrow_that_moves_nothing_keeps_the_card_open() {
+    let mut app = app_with_cards();
+    open(&mut app, "A");
+    send(&mut app, [Message::MoveSelection(Direction::Up)]);
+    assert_eq!(app.open_card(), Some(card(&app, "A")));
 }
 
 #[test]

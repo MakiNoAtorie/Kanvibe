@@ -331,7 +331,7 @@ pub enum Message {
     DragTick,
     /// Enter: open the selected Card (expand it in place).
     OpenCard,
-    /// Double-click on a Card: edit its title on the Card face.
+    /// Double-click on a Card: open it and edit its title.
     EditCard(Id),
     /// The open Card's ✕ button.
     CloseCard,
@@ -362,7 +362,7 @@ pub enum Message {
     /// Ctrl+Up / Ctrl+Down in the Item being edited.
     MoveEditedItem(Direction),
     RemoveItem(Id),
-    /// L, or a click on the open Card's Labels row: open the Label picker.
+    /// L, or a click on the open Card's Labels: open the Label picker.
     OpenLabels,
     CloseLabels,
     /// M, or "Move to Board…" in the open Card: open the Board picker.
@@ -405,7 +405,7 @@ pub enum Message {
     Format(description::Markup),
     /// A link clicked in the rendered description; only http, https and mailto open.
     OpenLink(String),
-    /// A click no widget took while the description editor is open: leave the editor.
+    /// A click no widget took: leave the description editor, else close the open Card.
     ClickOutside,
     /// "Export Board…" in the Board's ⋯ menu: the native Save dialog, then the file is written.
     ExportBoard(Id),
@@ -602,15 +602,13 @@ impl App {
             Message::DescriptionAction(action) => self.description_action(action),
             Message::Format(markup) => self.format(markup),
             Message::OpenLink(url) => description::open_link(&url),
-            Message::ClickOutside => {
-                if self
-                    .editing
-                    .as_ref()
-                    .is_some_and(|e| matches!(e.field, Field::Description(_)))
-                {
-                    self.commit_pending();
-                }
-            }
+            // One layer per click, as Esc: the description editor, then the open Card. A
+            // rename keeps its own commit points.
+            Message::ClickOutside => match self.editing.as_ref().map(|e| e.field) {
+                Some(Field::Description(_)) => _ = self.commit_pending(),
+                Some(_) => {}
+                None => self.open = false,
+            },
             Message::EditCard(card) => {
                 self.drag = None; // the double-click's own release is no click
                 return self.update(Message::StartEdit(Field::CardTitle(card)));
@@ -727,11 +725,12 @@ impl App {
             | Message::OpenFile(_) => return self.update_files(message),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
-                self.open = false; // arrows browse faces; Enter opens
                 if let Some(board) = self.board() {
                     let shown = |card: &Card| self.shown(card);
-                    self.selection =
-                        moved(board, self.selection, direction, shown).or(self.selection);
+                    let to = moved(board, self.selection, direction, shown);
+                    // Arrows browse faces: a move closes the open Card, Enter opens one.
+                    self.open &= to.is_none() || to == self.selection;
+                    self.selection = to.or(self.selection);
                 }
                 return self.reveal_selection();
             }
@@ -844,8 +843,8 @@ impl App {
                         start,
                         typed_at: None,
                     });
-                    // A Card's title and description are edited on its Card face: select it, so
-                    // it shows and is in view.
+                    // A Card's title and description are edited in the open Card: select and
+                    // open it, so it shows and is in view.
                     if let Field::CardTitle(card) | Field::Description(card) = field
                         && let Some(column) = self.data.column_of_card(card)
                     {
@@ -2029,10 +2028,7 @@ impl App {
         let header = row![
             title,
             crate::chrome::tip(
-                button(text("✕").size(META_SIZE))
-                    .style(faded(0.7))
-                    .padding([0, 2])
-                    .on_press(Message::CloseCard),
+                small_button("✕", Message::CloseCard).padding([0, 2]),
                 "Close (Esc)"
             )
         ]
@@ -2056,9 +2052,7 @@ impl App {
         // One time per line: both on one line overflow a 280px Column.
         let time = |label, at| {
             let at = local_time(at, &tz);
-            text(format!("{label} {at}"))
-                .size(META_SIZE)
-                .style(text::secondary)
+            text(format!("{label} {at}")).size(META_SIZE)
         };
         let times = column![
             time("Created", &card.created),
@@ -2068,11 +2062,11 @@ impl App {
             column![
                 header,
                 widget::rule::horizontal(1),
-                self.labels_row(card),
+                self.view_labels(card),
                 self.view_description(card),
                 self.view_checklist(card),
-                self.view_due(card),
                 self.view_files(card),
+                self.view_due(card),
                 widget::rule::horizontal(1),
                 column![actions, times].spacing(6),
             ]
@@ -2140,12 +2134,9 @@ pub(crate) fn strip_face<'a>(
         .clip(true)
 }
 
-/// An open Card section's heading: small and muted, so the Card's content leads.
+/// An open Card section's heading: small, so the Card's content leads.
 pub(crate) fn section_heading<'a>(label: impl text::IntoFragment<'a>) -> widget::Text<'a> {
-    text(label)
-        .size(META_SIZE)
-        .font(HEADING)
-        .style(text::secondary)
+    text(label).size(META_SIZE).font(HEADING)
 }
 
 /// The open Card's small text buttons: "+ Add …", Edit and the footer's actions.
@@ -2473,6 +2464,8 @@ pub(crate) const BOARD_TITLE_SIZE: u32 = 18;
 pub(crate) const COLUMN_NAME_SIZE: u32 = 13;
 pub(crate) const CARD_TITLE_SIZE: u32 = 14;
 pub(crate) const META_SIZE: u32 = 12;
+/// Text in the open Card's sections: Checklist Items, the empty description, the Due field.
+pub(crate) const SECTION_TEXT_SIZE: u32 = 13;
 /// Corner radii: Columns (and the "+ Add Column" ghost), Cards (and the header tint).
 pub(crate) const COLUMN_RADIUS: f32 = 10.0;
 pub(crate) const CARD_RADIUS: f32 = 6.0;

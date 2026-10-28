@@ -23,7 +23,7 @@ impl App {
         let id = card.id;
         let input = text_input("Due date", value)
             .id(INPUT)
-            .size(13)
+            .size(crate::app::SECTION_TEXT_SIZE)
             .padding([3, 6])
             .on_input(move |t| Message::DueChanged(id, t))
             .on_submit(Message::CommitEdit);

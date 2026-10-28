@@ -356,12 +356,12 @@ impl App {
     }
 
     /// The open Card's Labels row: the Card's chips (or "+ Add Label"); a click opens the picker.
-    pub(crate) fn labels_row<'a>(&'a self, card: &'a Card) -> Element<'a, Message> {
+    pub(crate) fn view_labels<'a>(&'a self, card: &'a Card) -> Element<'a, Message> {
         let chips = match self.board() {
             Some(board) => chips(board, card),
             None => None,
         };
-        let button = match chips {
+        let picker = match chips {
             Some(chips) => button(chips)
                 .style(button::text)
                 .padding([2, 0])
@@ -369,7 +369,7 @@ impl App {
             None => crate::app::small_button("+ Add Label", Message::OpenLabels),
         };
         let heading = crate::app::section_heading("Labels");
-        crate::app::section(heading, [crate::chrome::tip(button, "Labels (L)")])
+        crate::app::section(heading, [crate::chrome::tip(picker, "Labels (L)")])
     }
 
     /// The picker overlay over the dimmed app.

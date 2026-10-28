@@ -26,9 +26,13 @@ impl App {
                 .on_input(Message::EditChanged)
                 .on_submit(Message::SubmitItem(item.id))
                 .into(),
-            _ => mouse_area(text(&item.text).size(13).width(Fill))
-                .on_press(Message::StartEdit(field))
-                .into(),
+            _ => mouse_area(
+                text(&item.text)
+                    .size(crate::app::SECTION_TEXT_SIZE)
+                    .width(Fill),
+            )
+            .on_press(Message::StartEdit(field))
+            .into(),
         };
         let small = |label, message| {
             button(text(label).size(12).style(text::secondary))

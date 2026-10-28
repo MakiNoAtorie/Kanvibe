@@ -133,6 +133,7 @@ fn clicking_outside_leaves_the_editor_but_not_a_rename() {
     send(&mut app, [Message::ClickOutside]);
     assert!(!editing_description(&app));
     assert_eq!(description(&app, card), "x");
+    assert_eq!(app.open_card(), Some(card), "one layer per click");
 
     send(
         &mut app,
