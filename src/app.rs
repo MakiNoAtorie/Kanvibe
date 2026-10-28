@@ -1525,12 +1525,27 @@ impl App {
         // Hidden Cards are skipped but keep their index: drop slots are positions in all Cards.
         let shown = col.cards.iter().enumerate().filter(|(_, c)| self.shown(c));
         let cards = shown.map(|(i, card)| {
+            let outline = outlined(
+                container::bordered_box,
+                selection.is_some_and(|s| s.card == Some(card.id)),
+            );
+            // The Card being dragged stays in place, its text faded under the ghost.
+            let lifted = self
+                .drag
+                .as_ref()
+                .is_some_and(|d| d.started && d.item == Item::Card(card.id));
             let card_box = card_face(self.board(), card)
                 .id(card_widget(card.id))
-                .style(outlined(
-                    container::bordered_box,
-                    selection.is_some_and(|s| s.card == Some(card.id)),
-                ));
+                .style(move |theme| {
+                    let style = outline(theme);
+                    match lifted {
+                        true => container::Style {
+                            text_color: style.text_color.map(|c| c.scale_alpha(0.4)),
+                            ..style
+                        },
+                        false => style,
+                    }
+                });
             // Indicator above, padding below: Card slots touch, so no gap between them
             // falls through to the Column body.
             let slot = container(column![drag::indicator(gap == Some(i)), card_box].spacing(2))
