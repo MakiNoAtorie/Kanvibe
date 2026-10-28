@@ -55,3 +55,15 @@ _Avoid_: Search, query
 **Search**:
 A view listing Cards from every Board, active or archived, that match typed text; picking one opens its Board.
 _Avoid_: find, global filter
+
+**Due date**:
+An optional calendar date on a Card, shown as a badge on its face: amber when due today, red when overdue. No time, no reminder.
+_Avoid_: Deadline, due time, reminder
+
+**File**:
+A path to a file on this machine that a Card points at. Opened with its default program; never copied into the data folder.
+_Avoid_: Attachment, upload, link
+
+**Collapsed Column**:
+A Column folded to a narrow strip showing only its name and count. Remembered between launches; a click expands it.
+_Avoid_: Hidden column, minimised, folded list
