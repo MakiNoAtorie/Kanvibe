@@ -72,6 +72,11 @@ impl WindowState {
         self.pos = geometry.map(|g| Point::new(g.x, g.y));
     }
 
+    /// The window's size as last reported (or saved); `None` before any report.
+    pub fn size(&self) -> Option<Size> {
+        self.size
+    }
+
     pub fn resized(&mut self, size: Size) {
         self.minimised = size.width < 1.0 || size.height < 1.0;
         if !self.minimised {

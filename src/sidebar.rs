@@ -6,8 +6,8 @@ use crate::app::{App, Message, board_name_input, clipped_text};
 use crate::domain::{Board, Id};
 use crate::drag::{self, Drag, Item, Target};
 
-const WIDTH: u32 = 220;
-const RAIL: u32 = 40;
+pub(crate) const WIDTH: u32 = 220;
+pub(crate) const RAIL: u32 = 40;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let toggle = |label| {

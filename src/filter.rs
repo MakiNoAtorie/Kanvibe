@@ -115,7 +115,8 @@ impl App {
     }
 
     /// The Board header's filter controls: the text box with ×, and the Labels button.
-    pub(crate) fn filter_bar(&self) -> Element<'_, Message> {
+    /// `width` is the text box's: 220 px, or `Fill` on its own line in a narrow Board.
+    pub(crate) fn filter_bar(&self, width: iced::Length) -> Element<'_, Message> {
         let clear = self.filter.is_on().then(|| {
             crate::chrome::tip(
                 button("×")
@@ -131,14 +132,14 @@ impl App {
         row![crate::chrome::tip(
             text_input("Filter (Ctrl+F)", &self.filter.text)
                 .id(INPUT)
-                .width(220)
+                .width(width)
                 .on_input(Message::FilterChanged)
                 .on_submit(Message::SubmitFilter),
             "Filter (Ctrl+F)"
         )]
         .extend(clear)
         .push(
-            button(text(labels))
+            button(text(labels).wrapping(text::Wrapping::None))
                 .style(button::secondary)
                 .on_press(Message::ToggleFilterMenu),
         )

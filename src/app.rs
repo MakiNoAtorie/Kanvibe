@@ -1418,21 +1418,34 @@ impl App {
                 .on_press(Message::AddColumn(board.id))
                 .into(),
         ]);
-        let header = row![
-            self.editable_name(Field::BoardName(board.id), &board.name, 20),
-            self.filter_bar(),
-            button(text(format!("Archive ({})", board.archived_cards.len())))
-                .style(button::secondary)
-                .on_press(Message::OpenArchive),
-            crate::chrome::tip(
-                button("⋯")
-                    .style(button::text)
-                    .on_press(Message::ToggleBoardMenu),
-                "Board menu"
-            ),
-        ]
-        .spacing(8)
-        .align_y(Center);
+        let name = self.editable_name(Field::BoardName(board.id), &board.name, 20);
+        let archive = button(
+            text(format!("Archive ({})", board.archived_cards.len()))
+                .wrapping(text::Wrapping::None),
+        )
+        .style(button::secondary)
+        .on_press(Message::OpenArchive);
+        let menu_button = crate::chrome::tip(
+            button("⋯")
+                .style(button::text)
+                .on_press(Message::ToggleBoardMenu),
+            "Board menu",
+        );
+        // A narrow Board area puts the filter on its own line, so the name, Archive and ⋯
+        // keep their room.
+        let header: Element<_> = if self.board_width() < NARROW {
+            column![
+                row![name, archive, menu_button].spacing(8).align_y(Center),
+                self.filter_bar(Fill),
+            ]
+            .spacing(8)
+            .into()
+        } else {
+            row![name, self.filter_bar(220.into()), archive, menu_button]
+                .spacing(8)
+                .align_y(Center)
+                .into()
+        };
         let menu = self.board_menu.then(|| {
             row![
                 button("Rename")
@@ -1466,6 +1479,24 @@ impl App {
             .spacing(12)
             .padding(12)
             .into()
+    }
+
+    /// The Board area's width (window less sidebar and panel); unbounded before the window
+    /// reports a size.
+    fn board_width(&self) -> f32 {
+        let Some(size) = self.window.size() else {
+            return f32::INFINITY;
+        };
+        let sidebar = match (self.data.boards.is_empty(), self.sidebar_collapsed) {
+            (true, _) => 0,
+            (false, true) => crate::sidebar::RAIL,
+            (false, false) => crate::sidebar::WIDTH,
+        };
+        let panel = match self.panel {
+            Some(_) => crate::panel::WIDTH,
+            None => 0.0,
+        };
+        size.width - sidebar as f32 - panel
     }
 
     fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
@@ -1782,6 +1813,8 @@ fn outlined(
 }
 
 const BOARD_SCROLL: &str = "board";
+/// Below this Board-area width the header's filter moves to its own line.
+const NARROW: f32 = 640.0;
 
 fn column_widget(column: Id) -> widget::Id {
     widget::Id::from(format!("column-{column}"))
