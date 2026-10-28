@@ -1499,12 +1499,14 @@ impl App {
         });
         let cards = cards.chain([drag::indicator(gap == Some(col.cards.len()))]);
         let footer: Element<_> = match &self.capture {
-            Some(capture) if capture.column == col.id => text_input("Card title", &capture.text)
-                .id(CAPTURE_INPUT)
-                .on_input(Message::CaptureChanged)
-                .on_paste(Message::CapturePasted)
-                .on_submit(Message::SubmitCapture)
-                .into(),
+            Some(capture) if capture.column == col.id => {
+                text_input("Card title (Enter adds, Esc cancels)", &capture.text)
+                    .id(CAPTURE_INPUT)
+                    .on_input(Message::CaptureChanged)
+                    .on_paste(Message::CapturePasted)
+                    .on_submit(Message::SubmitCapture)
+                    .into()
+            }
             _ => crate::chrome::tip(
                 button("+ Add Card")
                     .style(button::text)

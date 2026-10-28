@@ -761,3 +761,12 @@ fn pasting_several_lines_into_the_capture_box_adds_one_card_per_line_as_one_step
     assert_eq!(card_titles(&app, 0), ["Old"]);
     assert_eq!(app.capture.as_ref().map(|c| c.text.as_str()), Some("one"));
 }
+
+#[test]
+fn the_capture_box_placeholder_states_enter_and_esc() {
+    let mut app = app_with_board();
+    let todo = column_id(&app, 0);
+    send(&mut app, [Message::OpenCapture(todo)]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("Card title (Enter adds, Esc cancels)").is_ok());
+}
