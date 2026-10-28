@@ -5,7 +5,7 @@ use std::fs;
 use std::time::Duration;
 
 use iced::widget::{column, container, row, text};
-use iced::{Element, Fill, Padding, Task, Theme};
+use iced::{Center, Element, Fill, Padding, Task, Theme};
 
 use crate::app::{
     App, BOARD_TITLE_SIZE, CARD_GAP, CARD_TITLE_SIZE, COLUMN_GAP, COLUMN_NAME_SIZE, COLUMN_WIDTH,
@@ -19,6 +19,7 @@ pub const LIMIT: u32 = 8192;
 const PAD: u32 = 12;
 const COLUMN: u32 = COLUMN_WIDTH as u32;
 const SPACING: u32 = COLUMN_GAP as u32;
+const STRIP: u32 = crate::app::STRIP_WIDTH as u32;
 
 fn too_large(width: u32, height: &str) -> String {
     format!(
@@ -31,10 +32,25 @@ fn too_large(width: u32, height: &str) -> String {
 /// The height is unknown before rendering, so it reads "…".
 fn width(board: &Board) -> Result<u32, String> {
     let n = board.columns.len().max(1) as u32;
-    let width = 2 * PAD + n * COLUMN + (n - 1) * SPACING;
+    let columns: u32 = match board.columns.is_empty() {
+        true => COLUMN,
+        false => board
+            .columns
+            .iter()
+            .map(|c| column_width(c.collapsed))
+            .sum(),
+    };
+    let width = 2 * PAD + columns + (n - 1) * SPACING;
     match width > LIMIT {
         true => Err(too_large(width, "…")),
         false => Ok(width),
+    }
+}
+
+fn column_width(collapsed: bool) -> u32 {
+    match collapsed {
+        true => STRIP,
+        false => COLUMN,
     }
 }
 
@@ -98,6 +114,22 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
     let columns = s.board.columns.iter().map(|col| {
         let shown = |c: &_| s.filter.matches(c, &s.board.labels);
         let count = count_badge(s.filter.count_label(col, shown), col.over_limit());
+        if col.collapsed {
+            // The Board's strip: count over the clipped name.
+            let name = text(&col.name)
+                .size(COLUMN_NAME_SIZE)
+                .font(HEADING)
+                .style(text::secondary);
+            let name = container(name.wrapping(text::Wrapping::None))
+                .width(Fill)
+                .clip(true);
+            return container(column![count, name].spacing(8).align_x(Center))
+                .width(STRIP as f32)
+                .padding([8, 4])
+                .clip(true)
+                .style(column_style)
+                .into();
+        }
         let name = text(&col.name)
             .size(COLUMN_NAME_SIZE)
             .font(HEADING)

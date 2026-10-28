@@ -54,6 +54,7 @@ fn data(boards: usize, cards: usize) -> Data {
                     id: id(),
                     name: name.into(),
                     limit: Some(50),
+                    collapsed: false,
                     cards: Vec::new(),
                 })
                 .into();

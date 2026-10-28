@@ -131,7 +131,7 @@ fn export_writes_the_board_with_its_format_and_version_and_no_settings() {
 
     let file: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(file["format"], "kanvibe-board");
-    assert_eq!(file["version"], 1);
+    assert_eq!(file["version"], 2);
     assert_eq!(file["board"]["name"], "Work");
     assert_eq!(file["board"]["labels"][0]["name"], "Bug");
     assert_eq!(file["board"]["archived_cards"][1]["card"]["title"], "D");
@@ -239,7 +239,7 @@ fn importing_a_file_that_is_not_a_board_export_is_refused() {
 
 #[test]
 fn importing_a_board_from_a_newer_version_is_refused() {
-    let bytes = br#"{"format": "kanvibe-board", "version": 2, "board": {"id": 1, "name": "X"}}"#;
+    let bytes = br#"{"format": "kanvibe-board", "version": 3, "board": {"id": 1, "name": "X"}}"#;
 
     assert_eq!(
         refusal(bytes).as_deref(),

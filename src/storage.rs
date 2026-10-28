@@ -12,7 +12,9 @@ const FILE: &str = "kanvibe.json";
 const TMP: &str = "kanvibe.json.tmp";
 const LOCK: &str = "kanvibe.lock";
 const BACKUPS: [&str; 2] = ["kanvibe.json.bak1", "kanvibe.json.bak2"];
-const VERSION: u32 = 1;
+/// The data file and Board export version. 2 added `Column.collapsed`, `Card.due` and
+/// `Card.files`, all defaulted when absent, so a v1 file loads with no migration.
+pub(crate) const VERSION: u32 = 2;
 /// `.bak1` older than this is refreshed before any save.
 const STALE: Duration = Duration::from_secs(24 * 3600);
 
@@ -406,7 +408,7 @@ fn parse(bytes: &[u8]) -> Result<(Loaded, u32), LoadError> {
         return Err(LoadError::Newer);
     }
     // Migrations from older versions go here, oldest first, rewriting the JSON before `FileIn`
-    // reads it. None yet: version 0 reads as version 1.
+    // reads it. None yet: versions 0 and 1 read as version 2.
     let file: FileIn = serde_json::from_slice(bytes).map_err(unreadable)?;
     // A `last_board` that isn't an active Board needs no repair: `App::open` falls back.
     let (data, repaired) = crate::repair::repair(Data {

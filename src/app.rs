@@ -448,6 +448,8 @@ pub enum Message {
     RemoveFile(Id, usize),
     /// A click on a file: open it with its default program.
     OpenFile(String),
+    /// "Collapse" in the Column menu, or a click on a collapsed Column's strip.
+    ToggleCollapse(Id),
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -925,6 +927,13 @@ impl App {
                 self.limit_input = None;
                 self.column_menu = (self.column_menu != Some(column)).then_some(column);
             }
+            Message::ToggleCollapse(column) => {
+                self.commit_pending();
+                self.column_menu = None;
+                if self.data.toggle_collapse(column).is_some() {
+                    self.record_step(self.data.board_of_column(column));
+                }
+            }
             Message::OpenLimit(column) => {
                 self.commit_pending();
                 self.column_menu = None;
@@ -1072,7 +1081,12 @@ impl App {
                     (Item::Board(board), _) if !drag.started => {
                         return self.update(Message::OpenBoard(board));
                     }
-                    (Item::Column(_), _) if !drag.started => {}
+                    (Item::Column(column), _) if !drag.started => {
+                        // A click on a collapsed Column's strip expands it.
+                        if self.data.column(column).is_some_and(|c| c.collapsed) {
+                            return self.update(Message::ToggleCollapse(column));
+                        }
+                    }
                     (Item::Card(card), Some(Target::Board(board))) => {
                         return self.update(Message::MoveToBoard(card, board));
                     }
@@ -1111,8 +1125,12 @@ impl App {
             Target::Column(column) => (column, usize::MAX),
             _ => return,
         };
-        let cards = self.data.column(column).map_or(&[][..], |c| &c.cards);
-        let gap = filter::placement(cards, gap, |c| self.shown(c));
+        let col = self.data.column(column);
+        let cards = col.map_or(&[][..], |c| &c.cards);
+        let gap = match col.is_some_and(|c| c.collapsed) {
+            true => cards.len(), // a collapsed Column's strip means "append"
+            false => filter::placement(cards, gap, |c| self.shown(c)),
+        };
         // The Card leaves its own slot first, so a later gap in its Column moves up by one.
         let from = cards.iter().position(|x| x.id == card);
         let index = match from {
@@ -1298,12 +1316,14 @@ impl App {
     }
 
     /// Part of `validate_ui`: keeps the selection on the current Board. It follows its Card to
-    /// another Column and is cleared when its Card or Column is gone.
+    /// another Column and is cleared when its Card or Column is gone. A Card in a collapsed
+    /// Column is hidden, so then only its Column stays selected.
     fn validate_selection(&mut self) {
         let here = |column: &Id| {
             let board = self.data.board_of_column(*column);
             board.is_some() && board == self.current_board
         };
+        let collapsed = |column: Id| self.data.column(column).is_some_and(|c| c.collapsed);
         self.selection = self.selection.and_then(|s| match s.card {
             Some(card) => self
                 .data
@@ -1311,7 +1331,7 @@ impl App {
                 .filter(here)
                 .map(|column| Selection {
                     column,
-                    card: Some(card),
+                    card: (!collapsed(column)).then_some(card),
                 }),
             None => here(&s.column).then_some(s),
         });
@@ -1690,6 +1710,9 @@ impl App {
         let selection = self.selection.filter(|s| s.column == col.id);
         // Only a Card drag registers Card slots and Column bodies; Column drags use gaps.
         let dragging = matches!(self.drag.as_ref().map(|d| d.item), Some(Item::Card(_)));
+        if col.collapsed {
+            return self.view_strip(col, selection.is_some(), dragging);
+        }
         // The slot the drop indicator shows: before Card `gap`, or after the last.
         let gap = match self.drag.as_ref().and_then(Drag::target) {
             Some(Target::Card { column, index }) if column == col.id => Some(index),
@@ -1842,6 +1865,10 @@ impl App {
                         .style(quiet)
                         .width(Fill)
                         .on_press(Message::OpenLimit(col.id)),
+                    button(text("Collapse").size(14))
+                        .style(quiet)
+                        .width(Fill)
+                        .on_press(Message::ToggleCollapse(col.id)),
                     button(
                         text(crate::archive::remove_column_text(col))
                             .size(14)
@@ -1880,6 +1907,31 @@ impl App {
             column: col.id,
             card: None,
         }));
+        drag::target(area, Target::Column(col.id), dragging).into()
+    }
+
+    /// A collapsed Column: a [`STRIP_WIDTH`] strip with the count over the clipped name (full
+    /// name in a tooltip). A click expands it, a drag moves the Column, a Card dropped on it
+    /// goes to its bottom.
+    fn view_strip<'a>(
+        &'a self,
+        col: &'a Column,
+        selected: bool,
+        dragging: bool,
+    ) -> Element<'a, Message> {
+        let hovered = self.drag.as_ref().and_then(Drag::target) == Some(Target::Column(col.id));
+        let name = text(&col.name).size(13).font(HEADING);
+        let name = clipped(name.wrapping(text::Wrapping::None), text(&col.name)).width(Fill);
+        let count = count_badge(self.count_label(col), col.over_limit());
+        let strip = container(column![count, name].spacing(8).align_x(Center))
+            .id(column_widget(col.id))
+            .width(STRIP_WIDTH)
+            .height(Fill)
+            .padding([8, 4])
+            .clip(true)
+            .style(outlined(column_style, selected || hovered));
+        // A press without a drag is a click: `DragEnd` expands the Column.
+        let area = drag::source(strip, Item::Column(col.id));
         drag::target(area, Target::Column(col.id), dragging).into()
     }
 
@@ -2301,6 +2353,8 @@ pub(crate) const CARD_RADIUS: f32 = 6.0;
 /// Gaps between Columns and between Cards.
 pub(crate) const COLUMN_GAP: f32 = 12.0;
 pub(crate) const CARD_GAP: f32 = 6.0;
+/// A collapsed Column's strip (the image export's too).
+pub(crate) const STRIP_WIDTH: f32 = 48.0;
 /// Board and Column names (the image export's too).
 pub(crate) const HEADING: iced::Font = iced::Font {
     weight: iced::font::Weight::Semibold,
@@ -2337,11 +2391,12 @@ fn moved(
     direction: Direction,
     shown: impl Fn(&Card) -> bool,
 ) -> Option<Selection> {
+    // A collapsed Column shows no Cards: the Selection lands on the Column itself.
     let visible = |column: &Column| -> Vec<Id> {
         column
             .cards
             .iter()
-            .filter(|c| shown(c))
+            .filter(|c| !column.collapsed && shown(c))
             .map(|c| c.id)
             .collect()
     };
@@ -2412,8 +2467,12 @@ fn card_move(
                 Direction::Left => board.columns.get(ci.checked_sub(1)?)?,
                 _ => board.columns.get(ci + 1)?,
             };
-            // After the last visible Card, as a drop on the Column body (the bottom unfiltered).
-            let at = filter::placement(&next.cards, next.cards.len(), &shown);
+            // After the last visible Card, as a drop on the Column body (the bottom unfiltered);
+            // a collapsed Column shows none, so at its bottom.
+            let at = match next.collapsed {
+                true => next.cards.len(),
+                false => filter::placement(&next.cards, next.cards.len(), &shown),
+            };
             Some((card, next.id, at))
         }
     }
