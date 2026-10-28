@@ -1471,9 +1471,10 @@ impl App {
             .extend(menu)
             .extend(self.filter_lines(board))
             .push(
+                // Embedded scrollbars take their own lane instead of covering the content.
                 scrollable(row(columns).height(Fill))
                     .id(BOARD_SCROLL)
-                    .horizontal()
+                    .direction(widget::scrollable::Direction::Horizontal(scrollbar(8)))
                     .height(Fill),
             )
             .spacing(12)
@@ -1610,6 +1611,7 @@ impl App {
                 .push(
                     scrollable(column(cards))
                         .id(cards_widget(col.id))
+                        .direction(widget::scrollable::Direction::Vertical(scrollbar(6)))
                         .height(Fill),
                 )
                 .push(footer)
@@ -1791,6 +1793,14 @@ fn reveal(scrollable: widget::Id, child: widget::Id, horizontal: bool) -> Task<M
             })
         })
     })
+}
+
+/// A `width`-px scrollbar embedded 4px from the content it scrolls.
+fn scrollbar(width: u32) -> widget::scrollable::Scrollbar {
+    widget::scrollable::Scrollbar::new()
+        .width(width)
+        .scroller_width(width)
+        .spacing(4)
 }
 
 /// The secondary button: weakest background, 1px strong border, weak background on hover.
