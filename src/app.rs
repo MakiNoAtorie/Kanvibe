@@ -1283,16 +1283,27 @@ impl App {
         size: u32,
         drag: Option<Item>,
     ) -> Element<'a, Message> {
+        // Board and Column names are headings; Card titles stay body text.
+        let font = match field {
+            Field::BoardName(_) | Field::ColumnName(_) => HEADING,
+            _ => iced::Font::DEFAULT,
+        };
         match &self.editing {
             Some(edit) if edit.field == field => text_input("Name", &edit.text)
                 .id(EDIT_INPUT)
                 .size(size)
+                .font(font)
                 .on_input(Message::EditChanged)
                 .on_submit(Message::CommitEdit)
                 .into(),
             _ => {
-                let label = mouse_area(text(name).size(size).wrapping(text::Wrapping::None))
-                    .on_double_click(Message::StartEdit(field));
+                let label = mouse_area(
+                    text(name)
+                        .size(size)
+                        .font(font)
+                        .wrapping(text::Wrapping::None),
+                )
+                .on_double_click(Message::StartEdit(field));
                 let label = match drag {
                     Some(item) => label
                         .on_press(Message::DragPress(item))
@@ -1852,6 +1863,11 @@ fn outlined(
 }
 
 const BOARD_SCROLL: &str = "board";
+/// Board and Column names (the image export's too).
+pub(crate) const HEADING: iced::Font = iced::Font {
+    weight: iced::font::Weight::Semibold,
+    ..iced::Font::DEFAULT
+};
 /// Below this Board-area width the header's filter moves to its own line.
 const NARROW: f32 = 640.0;
 

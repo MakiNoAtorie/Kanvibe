@@ -7,7 +7,7 @@ use std::time::Duration;
 use iced::widget::{column, container, row, text};
 use iced::{Element, Fill, Padding, Task, Theme};
 
-use crate::app::{App, Message, card_face};
+use crate::app::{App, HEADING, Message, card_face};
 use crate::domain::Board;
 use crate::filter::Filter;
 
@@ -100,7 +100,7 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
             true => count.style(text::danger),
             false => count,
         };
-        let header = row![text(&col.name).size(16).width(Fill), count].spacing(8);
+        let header = row![text(&col.name).size(16).font(HEADING).width(Fill), count].spacing(8);
         let cards = col
             .cards
             .iter()
@@ -118,7 +118,7 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
             .into()
     });
     column![
-        text(&s.board.name).size(20),
+        text(&s.board.name).size(20).font(HEADING),
         row(columns).spacing(SPACING as f32)
     ]
     .spacing(12)
