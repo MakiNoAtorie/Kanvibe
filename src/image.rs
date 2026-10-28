@@ -7,15 +7,18 @@ use std::time::Duration;
 use iced::widget::{column, container, row, text};
 use iced::{Element, Fill, Padding, Task, Theme};
 
-use crate::app::{App, HEADING, Message, card_face, card_style, column_style, count_badge};
+use crate::app::{
+    App, BOARD_TITLE_SIZE, CARD_GAP, CARD_TITLE_SIZE, COLUMN_GAP, COLUMN_NAME_SIZE, COLUMN_WIDTH,
+    HEADING, Message, card_face, card_style, column_style, count_badge,
+};
 use crate::domain::Board;
 use crate::filter::Filter;
 
 /// Pixels per side: wgpu's default texture limit (rendering past it panics).
 pub const LIMIT: u32 = 8192;
 const PAD: u32 = 12;
-const COLUMN: u32 = 280;
-const SPACING: u32 = 12;
+const COLUMN: u32 = COLUMN_WIDTH as u32;
+const SPACING: u32 = COLUMN_GAP as u32;
 
 fn too_large(width: u32, height: &str) -> String {
     format!(
@@ -94,17 +97,25 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
     let columns = s.board.columns.iter().map(|col| {
         let shown = |c: &_| s.filter.matches(c, &s.board.labels);
         let count = count_badge(s.filter.count_label(col, shown), col.over_limit());
-        let header = row![text(&col.name).size(14).font(HEADING).width(Fill), count].spacing(8);
+        let name = text(&col.name)
+            .size(COLUMN_NAME_SIZE)
+            .font(HEADING)
+            .style(text::secondary);
+        let header = row![name.width(Fill), count].spacing(8);
         let cards = col
             .cards
             .iter()
             .filter(|c| s.filter.matches(c, &s.board.labels));
         let cards = cards.map(|c| {
-            card_face(Some(&s.board), c, text(&c.title).width(Fill).into())
-                .style(card_style)
-                .into()
+            card_face(
+                Some(&s.board),
+                c,
+                text(&c.title).size(CARD_TITLE_SIZE).width(Fill).into(),
+            )
+            .style(card_style)
+            .into()
         });
-        let cards = column(cards).spacing(6);
+        let cards = column(cards).spacing(CARD_GAP);
         container(column![header, cards].spacing(8))
             .width(COLUMN as f32)
             .padding(8)
@@ -112,7 +123,7 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
             .into()
     });
     column![
-        text(&s.board.name).size(20).font(HEADING),
+        text(&s.board.name).size(BOARD_TITLE_SIZE).font(HEADING),
         row(columns).spacing(SPACING as f32)
     ]
     .spacing(12)

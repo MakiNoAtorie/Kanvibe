@@ -166,7 +166,7 @@ pub fn indicator<'a>(active: bool) -> Element<'a, Message> {
 }
 
 /// The width of the gaps between Columns (and at both ends), which hold [`indicator_v`].
-pub const GAP: f32 = 14.0;
+pub const GAP: f32 = crate::app::COLUMN_GAP;
 
 /// The 2px vertical drop indicator, centred in a [`GAP`]-wide gap between Columns.
 pub fn indicator_v<'a>(active: bool) -> Element<'a, Message> {

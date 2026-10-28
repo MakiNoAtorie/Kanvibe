@@ -145,9 +145,24 @@ pub fn logical(x: i32, y: i32, width: u32, height: u32, scale: f32) -> Geometry 
     }
 }
 
-/// The light theme: paper greys on a warm `#f7f7f5` page. Surfaces read from the background
-/// tiers in both themes: `weakest` is the raised surface (Columns, buttons),
-/// which is white here; iced's dark theme already lifts it toward the text. The other tiers
+/// The three layers both themes choose rather than derive, stored in the background tiers
+/// every style reads: `base` is the page, `weaker` the Column, `weakest` the Card (and raised
+/// buttons), `weak` the hairline border.
+fn layers(
+    mut extended: palette::Extended,
+    p: Palette,
+    column: Color,
+    card: Color,
+    border: Color,
+) -> palette::Extended {
+    extended.background.base = palette::Pair::new(p.background, p.text);
+    extended.background.weaker = palette::Pair::new(column, p.text);
+    extended.background.weakest = palette::Pair::new(card, p.text);
+    extended.background.weak = palette::Pair::new(border, p.text);
+    extended
+}
+
+/// The light theme: white Cards on a grey Column on a warm `#f7f7f5` page. The other tiers
 /// come from a neutral page: iced's darkening multiplies a warm page's chroma into olive.
 static LIGHT: LazyLock<Theme> = LazyLock::new(|| {
     let paper = Palette {
@@ -160,10 +175,34 @@ static LIGHT: LazyLock<Theme> = LazyLock::new(|| {
             background: color!(0xf7f7f7),
             ..p
         };
-        let mut extended = palette::Extended::generate(neutral);
-        extended.background.base = palette::Pair::new(p.background, p.text);
-        extended.background.weakest = palette::Pair::new(Color::WHITE, p.text);
-        extended
+        let extended = palette::Extended::generate(neutral);
+        layers(
+            extended,
+            p,
+            color!(0xecece9),
+            Color::WHITE,
+            color!(0xdcdcd8),
+        )
+    })
+});
+
+/// The dark theme: the same three steps, each lighter than the one below, with iced's dark
+/// primary and danger.
+static DARK: LazyLock<Theme> = LazyLock::new(|| {
+    let night = Palette {
+        background: color!(0x1b1b1d),
+        text: color!(0xe6e6e6),
+        ..Palette::DARK
+    };
+    Theme::custom_with_fn("Kanvibe Dark", night, |p| {
+        let extended = palette::Extended::generate(p);
+        layers(
+            extended,
+            p,
+            color!(0x242428),
+            color!(0x2e2e33),
+            color!(0x3a3a40),
+        )
     })
 });
 
@@ -180,7 +219,7 @@ impl App {
     /// The light or dark iced theme.
     pub fn theme(&self) -> Theme {
         if self.dark {
-            Theme::Dark
+            DARK.clone()
         } else {
             LIGHT.clone()
         }
