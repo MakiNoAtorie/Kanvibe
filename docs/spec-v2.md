@@ -95,7 +95,7 @@ Ten changes, each small, none adding a subsystem:
 48. As a user, I want several `#name` words in one title to attach several Labels, so that the syntax scales.
 49. As a user, I want a `#name` that matches no Label to stay in the title as plain text, so that a typo never creates a Label.
 50. As a user, I want the same syntax to apply to each line of a multi-line paste, so that bulk capture gets Labels too.
-51. As a user, I want a title that is only `#name` words to create nothing, so that there are no empty Cards.
+51. As a user, I want a title that is only `#name` words to keep the words as its title, so that what I typed is never thrown away.
 52. As a user, I want a `#` inside a word (like `C#` or `item#3`) left alone, so that only a leading `#` means a Label.
 
 ### Ctrl+Left/Right moves a Column
@@ -184,7 +184,7 @@ Ten changes, each small, none adding a subsystem:
 A good test builds an App, sends Messages through `update`, and asserts on the resulting domain data and UI state, never on widget trees. Pure domain functions are tested directly with fixed inputs, including a fixed "today" and "now".
 
 - **Key mapping** (`tests/keys.rs` style): Ctrl+Shift+F, Ctrl+D, and the unchanged Ctrl+Left/Right mapping.
-- **Update seam** (`tests/update.rs` style, the `app_with_cards` helper): Ctrl+Left/Right with a Column selected moves the Column and keeps the Selection; at an edge records no step. Enter opens the selected Card; arrows move the open Card; Esc closes it; a Board switch closes it. Duplicate inserts after the original with Items unticked and selects the copy. Collapse persists through a save/load round trip, Left/Right skips the collapsed Column's Cards, Ctrl+Right into it appends. Due text commits as ISO, bad text reverts, blank clears. Add/remove file round-trips and is one undo step. `#label` on submit attaches and strips; unmatched stays; all-tokens creates nothing; applies per pasted line.
+- **Update seam** (`tests/update.rs` style, the `app_with_cards` helper): Ctrl+Left/Right with a Column selected moves the Column and keeps the Selection; at an edge records no step. Enter opens the selected Card; arrows move the open Card; Esc closes it; a Board switch closes it. Duplicate inserts after the original with Items unticked and selects the copy. Collapse persists through a save/load round trip, Left/Right skips the collapsed Column's Cards, Ctrl+Right into it appends. Due text commits as ISO, bad text reverts, blank clears. Add/remove file round-trips and is one undo step. `#label` on submit attaches and strips; unmatched stays; all-tokens keeps the words as the title; applies per pasted line.
 - **Domain, direct**: due parsing table (the three formats, a bad one, blank); due status against a fixed today (future, today, overdue); ageing against a fixed now at 13, 14 and 15 days; search across two Boards with an archived Card and an archived Board; `#label` parsing table including `C#` and `item#3`.
 - **Storage** (`tests/storage.rs` style): a v1 file loads with all defaults; a v2 file is refused with the "newer" error by a loader given version 1; export and import carry due, files and collapsed.
 - **Image** (`tests/image.rs` style): a collapsed Column renders narrow; the open Card renders at face height; the due badge is drawn. These check dimensions and a few pixels, as the existing image tests do.

@@ -847,11 +847,22 @@ fn a_hash_label_in_the_capture_box_attaches_it_and_one_undo_removes_both() {
 }
 
 #[test]
-fn a_capture_title_of_only_label_tokens_creates_nothing() {
-    let (mut app, _, _) = app_with_labels();
+fn a_capture_title_of_only_label_tokens_keeps_them_as_its_title_with_the_labels() {
+    let (mut app, bug, urgent) = app_with_labels();
     let todo = column_id(&app, 0);
-    capture(&mut app, todo, &["#bug", "  #Bug #urgent "]);
-    assert!(card_titles(&app, 0).is_empty());
+    capture(&mut app, todo, &["  #Bug #urgent "]);
+    send(
+        &mut app,
+        [
+            Message::CaptureChanged("#bug".into()),
+            Message::CaptureDescriptionChanged("typed notes".into()),
+            Message::SubmitCapture,
+        ],
+    );
+    assert_eq!(card_titles(&app, 0), ["#Bug #urgent", "#bug"]);
+    assert_eq!(card_labels(&app, 0), [vec![bug, urgent], vec![bug]]);
+    let card = &app.data.boards[0].columns[0].cards[1];
+    assert_eq!(card.description, "typed notes");
 }
 
 #[test]
@@ -865,8 +876,11 @@ fn a_multi_line_paste_labels_each_line() {
             Message::CaptureLines(Some("a #bug\n#urgent b #Bug\n#bug\nc".into())),
         ],
     );
-    assert_eq!(card_titles(&app, 0), ["a", "b", "c"]);
-    assert_eq!(card_labels(&app, 0), [vec![bug], vec![urgent, bug], vec![]]);
+    assert_eq!(card_titles(&app, 0), ["a", "b", "#bug", "c"]);
+    assert_eq!(
+        card_labels(&app, 0),
+        [vec![bug], vec![urgent, bug], vec![bug], vec![]]
+    );
     send(&mut app, [Message::Escape, Message::Undo]);
     assert!(card_titles(&app, 0).is_empty());
 }

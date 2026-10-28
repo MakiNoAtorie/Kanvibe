@@ -571,14 +571,15 @@ fn hash_tokens_naming_a_label_attach_it_and_leave_the_title() {
         color: "red".into(),
     };
     let board = [label(1, "Bug"), label(2, "urgent")];
-    let table: [(&str, &str, &[Id]); 10] = [
+    let table: [(&str, &str, &[Id]); 11] = [
         ("Fix login #bug", "Fix login", &[1]),
         ("#urgent Fix #Bug login", "Fix login", &[2, 1]),
         ("Fix #typo now", "Fix #typo now", &[]),
         ("Fix #BUG", "Fix", &[1]),
         ("Learn C# today", "Learn C# today", &[]),
         ("See item#3", "See item#3", &[]),
-        ("#bug #urgent", "", &[1, 2]),
+        ("#bug #urgent", "#bug #urgent", &[1, 2]),
+        ("Keep   my  spacing", "Keep   my  spacing", &[]),
         ("  Fix   #bug   login  ", "Fix login", &[1]),
         ("Fix # alone", "Fix # alone", &[]),
         ("#bug twice #bug", "twice", &[1]),
