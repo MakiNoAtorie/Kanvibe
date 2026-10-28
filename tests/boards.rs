@@ -376,3 +376,20 @@ fn the_board_name_prompt_has_a_create_button() {
     }
     assert_eq!(names(&app), ["A", "B"]);
 }
+
+#[test]
+fn the_archived_heading_shows_whether_it_is_open() {
+    let (mut app, [a, _, _]) = app_with_boards();
+    send(&mut app, [Message::ArchiveBoard(a)]); // opens the section
+    assert!(
+        iced_test::simulator(app.view())
+            .find("Archived (1) ▾")
+            .is_ok()
+    );
+    send(&mut app, [Message::ToggleArchivedBoards]);
+    assert!(
+        iced_test::simulator(app.view())
+            .find("Archived (1) ▸")
+            .is_ok()
+    );
+}
