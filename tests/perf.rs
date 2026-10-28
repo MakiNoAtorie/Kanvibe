@@ -320,7 +320,7 @@ fn measure(table: &mut Table, boards: usize, cards: usize) {
     let mid = board.columns[0].cards[board.columns[0].cards.len() / 2].id;
 
     let view = |app: &App| timed(|| drop(app.view()));
-    table.add("view: panel closed", mean(200, || view(&app)));
+    table.add("view: Card closed", mean(200, || view(&app)));
 
     let mut w = 1600.0;
     table.add(
@@ -339,7 +339,7 @@ fn measure(table: &mut Table, boards: usize, cards: usize) {
             card: Some(mid),
         }),
     );
-    let _ = send(&mut app, Message::ClosePanel);
+    let _ = send(&mut app, Message::CloseCard);
     let mut down = false;
     table.add(
         "KeyWithFocus(arrow) selection move",
@@ -420,8 +420,8 @@ fn measure(table: &mut Table, boards: usize, cards: usize) {
             card: Some(first),
         }),
     );
-    table.add("view: panel open", mean(200, || view(&app)));
-    let _ = send(&mut app, Message::ClosePanel);
+    table.add("view: Card open", mean(200, || view(&app)));
+    let _ = send(&mut app, Message::CloseCard);
     let _ = send(&mut app, Message::FilterChanged("fix".into()));
     table.add("view: text Filter on", mean(200, || view(&app)));
     let _ = send(&mut app, Message::ClearFilter);

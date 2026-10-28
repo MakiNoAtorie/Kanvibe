@@ -1,4 +1,4 @@
-//! The Checklist section of the Card panel.
+//! The Checklist section of the open Card.
 use iced::widget::{button, checkbox, column, mouse_area, row, text, text_input};
 use iced::{Center, Element, Fill};
 

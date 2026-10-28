@@ -11,7 +11,6 @@ pub mod image;
 pub mod keys;
 pub mod labels;
 pub mod move_board;
-pub mod panel;
 pub mod repair;
 pub mod sidebar;
 pub mod startup;

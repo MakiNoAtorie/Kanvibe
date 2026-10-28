@@ -92,7 +92,7 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         return None;
     }
     match key {
-        Key::Named(Named::Enter) if !ctrl => return Some(Message::EditTitle),
+        Key::Named(Named::Enter) if !ctrl => return Some(Message::OpenCard),
         Key::Named(Named::F2) => return Some(Message::EditTitle),
         Key::Named(Named::Delete) => return Some(Message::ArchiveSelected),
         _ => {}

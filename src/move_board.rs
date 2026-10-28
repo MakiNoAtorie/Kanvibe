@@ -6,11 +6,10 @@ use crate::app::{App, Message, dialog, dialog_header};
 use crate::domain::Id;
 
 impl App {
-    /// "Move to Board…" / M: opens the picker for the open Card, else the selected one.
+    /// "Move to Board…" / M: opens the picker for the selected (or open) Card.
     pub(crate) fn open_move(&mut self) {
         self.commit_pending();
-        let selected = self.selection.and_then(|s| s.card);
-        self.move_picker = self.panel.or(selected);
+        self.move_picker = self.selection.and_then(|s| s.card);
     }
 
     /// Moves `card` to the active Board `board` as one undo step (undo shows the source Board,

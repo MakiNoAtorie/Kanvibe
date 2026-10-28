@@ -1,6 +1,6 @@
 //! "Save as image…": the whole Board, Filter applied strictly, rendered off-screen to a PNG
 //! by `iced_test::screenshot` on a second iced program whose view is [`view`]. No sidebar,
-//! no Card panel, no scrolling; current theme, scale 1.0, on a worker thread.
+//! the open Card as a plain face, no scrolling; current theme, scale 1.0, on a worker thread.
 use std::fs;
 use std::time::Duration;
 

@@ -40,9 +40,9 @@ _Avoid_: Trash, bin, recycle bin
 The Column, and optionally one of its Cards, that keyboard actions act on. Shown with an outline.
 _Avoid_: Focus, cursor, highlight
 
-**Card panel**:
-The right-hand panel showing every field of the selected Card for editing.
-_Avoid_: Detail view, modal, editor, inspector
+**Open Card**:
+The selected Card, expanded in place to show all of its fields.
+_Avoid_: Panel, detail view, modal, inspector
 
 **Capture box**:
 The one-line input at the bottom of a Column where a Card is created by typing its title.
