@@ -1297,13 +1297,13 @@ impl App {
                 .on_submit(Message::CommitEdit)
                 .into(),
             _ => {
-                let label = mouse_area(
-                    text(name)
-                        .size(size)
-                        .font(font)
-                        .wrapping(text::Wrapping::None),
-                )
-                .on_double_click(Message::StartEdit(field));
+                // The open Card's title wraps: the panel is where it is read in full.
+                let wrapping = match field {
+                    Field::CardTitle(_) => text::Wrapping::Word,
+                    _ => text::Wrapping::None,
+                };
+                let label = mouse_area(text(name).size(size).font(font).wrapping(wrapping))
+                    .on_double_click(Message::StartEdit(field));
                 let label = match drag {
                     Some(item) => label
                         .on_press(Message::DragPress(item))
