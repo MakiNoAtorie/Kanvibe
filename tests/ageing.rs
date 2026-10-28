@@ -22,6 +22,7 @@ fn card(updated: &str) -> Card {
         checklist: Vec::new(),
         labels: Vec::new(),
         description: String::new(),
+        files: Vec::new(),
     }
 }
 

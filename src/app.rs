@@ -440,6 +440,14 @@ pub enum Message {
     CloseSearch,
     /// Ctrl+D, or "Duplicate" in the open Card: copy the selected Card right below it.
     DuplicateCard,
+    /// "+ Add file…" in the open Card: the native Open dialog for this Card.
+    AddFile(Id),
+    /// The path picked for the Card; `None` when the dialog was cancelled.
+    FileChosen(Id, Option<std::path::PathBuf>),
+    /// The ✕ on the Card's file at this index.
+    RemoveFile(Id, usize),
+    /// A click on a file: open it with its default program.
+    OpenFile(String),
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -704,6 +712,10 @@ impl App {
             | Message::ImportBoard
             | Message::Imported(_) => return self.update_transfer(message),
             Message::SaveImage(_) | Message::ImageSaved(_) => return self.update_image(message),
+            Message::AddFile(_)
+            | Message::FileChosen(..)
+            | Message::RemoveFile(..)
+            | Message::OpenFile(_) => return self.update_files(message),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
                 if let Some(board) = self.board() {
@@ -1948,6 +1960,7 @@ impl App {
                 self.labels_row(card),
                 self.view_description(card),
                 self.view_checklist(card),
+                self.view_files(card),
                 column![actions, times].spacing(6),
             ]
             .spacing(12),
@@ -1969,7 +1982,7 @@ pub fn local_time(timestamp: &str, tz: &jiff::tz::TimeZone) -> String {
 }
 
 /// A Card's face, unstyled: title, the description's first line, then one metadata row
-/// (Label chips, Checklist progress).
+/// (Label chips, Checklist progress, files marker).
 /// Shared by the Board view and the image export.
 pub(crate) fn card_face<'a>(
     board: Option<&'a Board>,
@@ -1983,6 +1996,7 @@ pub(crate) fn card_face<'a>(
             // ✓, not ☑: that renders as a colour emoji competing with the chips.
             .map(|p| text(format!("✓ {p}")).size(META_SIZE).into()),
     );
+    meta.extend(crate::files::marker(card));
     let meta = (!meta.is_empty()).then(|| metadata_row(meta).into());
     container(
         column![title]
