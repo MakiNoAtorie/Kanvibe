@@ -163,7 +163,7 @@ fn picking_a_hit_on_another_board_opens_it_on_that_card() {
         card: Some(groceries),
     };
     assert_eq!(app.selection, Some(selection));
-    assert_eq!(app.panel, Some(groceries));
+    assert_eq!(app.open_card(), Some(groceries));
 }
 
 #[test]

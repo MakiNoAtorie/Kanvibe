@@ -114,7 +114,7 @@ impl App {
                 self.archive = None;
                 let card = Some(card);
                 let reveal = self.update(Message::Select(Selection { column, card }));
-                Task::batch([reveal, self.update(Message::OpenPanel)])
+                Task::batch([reveal, self.update(Message::OpenCard)])
             }
             None => {
                 let _ = self.update(Message::OpenArchive);
