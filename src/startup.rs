@@ -230,6 +230,10 @@ pub fn run() -> iced::Result {
         Screen::App(app) => app.fit_window(&crate::chrome::monitors()),
         Screen::Problem(_) => App::default().fit_window(&[]),
     };
+    let window = iced::window::Settings {
+        icon: icon(),
+        ..window
+    };
     let screen = std::cell::Cell::new(Some(screen));
     let boot = move || screen.take().expect("iced boots once");
     iced::application(boot, Screen::update, Screen::view)
@@ -239,6 +243,17 @@ pub fn run() -> iced::Result {
         .subscription(Screen::subscription)
         .exit_on_close_request(false) // the app commits the pending edit on CloseRequested first
         .run()
+}
+
+/// The K logo for the title bar and taskbar; `None` (the default icon) if the PNG won't decode.
+pub fn icon() -> Option<iced::window::Icon> {
+    let png = include_bytes!("../assets/kanvibe.png");
+    let mut reader = png::Decoder::new(std::io::Cursor::new(png))
+        .read_info()
+        .ok()?;
+    let mut rgba = vec![0; reader.output_buffer_size()?];
+    let frame = reader.next_frame(&mut rgba).ok()?;
+    iced::window::icon::from_rgba(rgba, frame.width, frame.height).ok()
 }
 
 /// A blocking native OK box, for before iced starts.

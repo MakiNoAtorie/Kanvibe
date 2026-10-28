@@ -331,3 +331,8 @@ fn minimising_a_maximised_window_keeps_the_restored_rectangle_and_the_flag() {
     assert!(settings.maximized, "it comes back maximised");
     assert_eq!(settings.window, Some(geometry(40.0, 50.0, 1000.0, 700.0)));
 }
+
+#[test]
+fn the_logo_decodes_into_a_window_icon() {
+    assert!(kanvibe::startup::icon().is_some());
+}

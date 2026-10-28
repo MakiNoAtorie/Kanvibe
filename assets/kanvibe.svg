@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Kanvibe">
+  <rect width="256" height="256" rx="56" fill="#f6f3ec"/>
+  <!-- A "K" built from Cards: one Column standing, two Cards fanning off it -->
+  <rect x="58" y="44" width="48" height="168" rx="12" fill="#1f2937"/>
+  <rect x="-46" y="-20" width="92" height="40" rx="12" fill="#ff6b5b" transform="translate(156 90) rotate(-45)"/>
+  <rect x="-46" y="-20" width="92" height="40" rx="12" fill="#ffb53b" transform="translate(156 166) rotate(45)"/>
+</svg>
