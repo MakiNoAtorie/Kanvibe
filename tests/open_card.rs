@@ -380,13 +380,13 @@ fn an_edit_that_changes_nothing_leaves_updated_alone() {
 }
 
 #[test]
-fn neighbours_shifting_does_not_touch_updated_but_a_column_change_does() {
+fn moving_touches_updated_but_neighbours_shifting_does_not() {
     let mut app = app_with_cards();
     click(&mut app, "C");
     send(&mut app, [Message::MoveCard(Direction::Up)]); // C above B, same Column
     assert_eq!(updated(&app, "A"), OLD);
     assert_eq!(updated(&app, "B"), OLD);
-    assert_eq!(updated(&app, "C"), OLD);
+    assert_ne!(updated(&app, "C"), OLD);
 
     send(&mut app, [Message::MoveCard(Direction::Right)]); // C into Doing
     assert_ne!(updated(&app, "C"), OLD);
