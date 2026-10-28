@@ -1698,7 +1698,8 @@ pub(crate) fn card_face<'a>(
         .extend(chips)
         .extend(
             card.progress()
-                .map(|p| text(format!("☑ {p}")).size(12).into()),
+                // ✓, not ☑: that renders as a colour emoji competing with the chips.
+                .map(|p| text(format!("✓ {p}")).size(12).into()),
         ),
     )
     .width(Fill)
