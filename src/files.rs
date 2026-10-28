@@ -2,7 +2,7 @@
 //! opened with their default program. Only the path is stored; nothing is copied.
 use std::path::Path;
 
-use iced::widget::{button, column, row, text};
+use iced::widget::{button, row, text};
 use iced::{Center, Element, Task};
 
 use crate::app::{App, Message};
@@ -106,14 +106,8 @@ impl App {
             .align_y(Center)
             .into()
         });
-        column![text("Files").size(13).font(crate::app::HEADING)]
-            .extend(rows)
-            .push(
-                button("+ Add file…")
-                    .style(button::text)
-                    .on_press(Message::AddFile(card.id)),
-            )
-            .spacing(6)
-            .into()
+        let add = crate::app::small_button("+ Add file…", Message::AddFile(card.id));
+        let body = rows.chain([add.into()]);
+        crate::app::section(crate::app::section_heading("Files"), body)
     }
 }

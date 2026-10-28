@@ -1,5 +1,5 @@
 //! The Checklist section of the open Card.
-use iced::widget::{button, checkbox, column, mouse_area, row, text, text_input};
+use iced::widget::{button, checkbox, mouse_area, row, text, text_input};
 use iced::{Center, Element, Fill};
 
 use crate::app::{App, Direction, EDIT_INPUT, Field, Message};
@@ -13,15 +13,9 @@ impl App {
             Some(p) => format!("Checklist {p}"),
             None => "Checklist".into(),
         };
-        column![text(heading).size(13).font(crate::app::HEADING)]
-            .extend(items)
-            .push(
-                button("+ Add Checklist Item")
-                    .style(button::text)
-                    .on_press(Message::AddItem(card.id)),
-            )
-            .spacing(6)
-            .into()
+        let add = crate::app::small_button("+ Add Checklist Item", Message::AddItem(card.id));
+        let body = items.chain([add.into()]);
+        crate::app::section(crate::app::section_heading(heading), body)
     }
 
     fn view_item<'a>(&'a self, item: &'a Item) -> Element<'a, Message> {
@@ -32,7 +26,7 @@ impl App {
                 .on_input(Message::EditChanged)
                 .on_submit(Message::SubmitItem(item.id))
                 .into(),
-            _ => mouse_area(text(&item.text).width(Fill))
+            _ => mouse_area(text(&item.text).size(13).width(Fill))
                 .on_press(Message::StartEdit(field))
                 .into(),
         };

@@ -361,20 +361,15 @@ impl App {
             Some(board) => chips(board, card),
             None => None,
         };
-        let shown: Element<_> = chips.unwrap_or_else(|| text("+ Add Label").size(12).into());
-        row![
-            text("Labels").size(13).font(crate::app::HEADING),
-            crate::chrome::tip(
-                button(shown)
-                    .style(button::text)
-                    .padding(2)
-                    .on_press(Message::OpenLabels),
-                "Labels (L)"
-            )
-        ]
-        .spacing(8)
-        .align_y(Center)
-        .into()
+        let button = match chips {
+            Some(chips) => button(chips)
+                .style(button::text)
+                .padding([2, 0])
+                .on_press(Message::OpenLabels),
+            None => crate::app::small_button("+ Add Label", Message::OpenLabels),
+        };
+        let heading = crate::app::section_heading("Labels");
+        crate::app::section(heading, [crate::chrome::tip(button, "Labels (L)")])
     }
 
     /// The picker overlay over the dimmed app.

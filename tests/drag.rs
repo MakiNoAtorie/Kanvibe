@@ -178,7 +178,7 @@ fn moving_less_than_5px_is_a_click_that_selects_the_card() {
             card
         })
     );
-    assert_eq!(app.open_card(), card, "a click opens the Card");
+    assert_eq!(app.open_card(), None, "a click only selects; Enter opens");
     assert_eq!(app.drag, None);
 }
 

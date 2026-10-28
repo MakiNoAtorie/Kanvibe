@@ -163,6 +163,7 @@ fn the_selection_goes_to_the_card_below_else_above_else_the_column() {
 fn archiving_the_open_card_closes_it_and_is_one_undo_step() {
     let mut app = app_with_cards();
     click(&mut app, "B");
+    send(&mut app, [Message::OpenCard]);
     let b = card(&app, "B");
     assert_eq!(app.open_card(), Some(b));
     send(&mut app, [Message::ArchiveCard(b)]);
@@ -270,6 +271,7 @@ fn the_archive_view_opens_and_esc_or_back_leaves_it() {
 fn esc_closes_the_archive_view_before_the_open_card_and_selection() {
     let mut app = app_with_cards();
     click(&mut app, "A");
+    send(&mut app, [Message::OpenCard]);
     app.archive = app.current_board; // reachable by undo, a click on nothing, etc.
     send(&mut app, [Message::Escape]);
     assert_eq!(app.archive, None);

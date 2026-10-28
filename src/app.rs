@@ -580,8 +580,9 @@ impl App {
             }
             Message::Select(selection) => {
                 self.commit_pending();
+                // A click selects; it opens nothing. A click inside the open Card keeps it open.
+                self.open &= self.open_card().is_some_and(|c| selection.card == Some(c));
                 self.selection = Some(selection);
-                self.open |= selection.card.is_some(); // clicking a Card opens it
                 return self.reveal_selection();
             }
             Message::OpenCard => {
@@ -726,6 +727,7 @@ impl App {
             | Message::OpenFile(_) => return self.update_files(message),
             Message::MoveSelection(direction) => {
                 self.commit_pending();
+                self.open = false; // arrows browse faces; Enter opens
                 if let Some(board) = self.board() {
                     let shown = |card: &Card| self.shown(card);
                     self.selection =
@@ -1395,7 +1397,7 @@ impl App {
     }
 
     /// Runs at the end of every `update`: the Selection is cleared when its Card is no longer an
-    /// active Card on the current Board, and open mode ends when there is no Selection at all.
+    /// active Card on the current Board, and the open Card closes when no Card is selected.
     /// The current Board is never archived or gone: it falls back to the next active Board
     /// below, else above (positions from `order`, the Board IDs before the update).
     fn validate_ui(&mut self, board: Option<Id>, order: &[Id]) {
@@ -1416,7 +1418,7 @@ impl App {
         self.validate_labels();
         self.validate_filter();
         self.validate_move();
-        self.open &= self.selection.is_some(); // a Column-only Selection keeps open mode
+        self.open &= self.open_card().is_some();
     }
 
     /// The Card is an active Card of the current Board.
@@ -2027,48 +2029,54 @@ impl App {
         let header = row![
             title,
             crate::chrome::tip(
-                button("✕").style(button::text).on_press(Message::CloseCard),
+                button(text("✕").size(META_SIZE))
+                    .style(faded(0.7))
+                    .padding([0, 2])
+                    .on_press(Message::CloseCard),
                 "Close (Esc)"
             )
         ]
         .spacing(8);
         let actions = row![
             crate::chrome::tip(
-                button("Move to Board…")
-                    .style(quiet)
-                    .on_press(Message::OpenMove),
+                small_button("Move to Board…", Message::OpenMove),
                 "Move to Board (M)"
             ),
             crate::chrome::tip(
-                button("Duplicate")
-                    .style(quiet)
-                    .on_press(Message::DuplicateCard),
+                small_button("Duplicate", Message::DuplicateCard),
                 "Duplicate (Ctrl+D)"
             ),
             crate::chrome::tip(
-                button("Archive")
-                    .style(quiet)
-                    .on_press(Message::ArchiveCard(card.id)),
+                small_button("Archive", Message::ArchiveCard(card.id)),
                 "Archive Card (Del)"
             ),
         ]
-        .spacing(8);
+        .spacing(14)
+        .wrap();
         // One time per line: both on one line overflow a 280px Column.
+        let time = |label, at| {
+            let at = local_time(at, &tz);
+            text(format!("{label} {at}"))
+                .size(META_SIZE)
+                .style(text::secondary)
+        };
         let times = column![
-            text(format!("Created {}", local_time(&card.created, &tz))).size(META_SIZE),
-            text(format!("Updated {}", local_time(&card.updated, &tz))).size(META_SIZE),
+            time("Created", &card.created),
+            time("Updated", &card.updated)
         ];
         container(
             column![
                 header,
+                widget::rule::horizontal(1),
                 self.labels_row(card),
                 self.view_description(card),
                 self.view_checklist(card),
                 self.view_due(card),
                 self.view_files(card),
+                widget::rule::horizontal(1),
                 column![actions, times].spacing(6),
             ]
-            .spacing(12),
+            .spacing(10),
         )
         .width(Fill)
         .padding([9, 11])
@@ -2130,6 +2138,30 @@ pub(crate) fn strip_face<'a>(
         .width(STRIP_WIDTH)
         .padding([8, 4])
         .clip(true)
+}
+
+/// An open Card section's heading: small and muted, so the Card's content leads.
+pub(crate) fn section_heading<'a>(label: impl text::IntoFragment<'a>) -> widget::Text<'a> {
+    text(label)
+        .size(META_SIZE)
+        .font(HEADING)
+        .style(text::secondary)
+}
+
+/// The open Card's small text buttons: "+ Add …", Edit and the footer's actions.
+pub(crate) fn small_button<'a>(label: &'a str, message: Message) -> widget::Button<'a, Message> {
+    button(text(label).size(META_SIZE))
+        .style(faded(0.7))
+        .padding([2, 0])
+        .on_press(message)
+}
+
+/// An open Card section: its heading over its body, close together.
+pub(crate) fn section<'a>(
+    heading: impl Into<Element<'a, Message>>,
+    body: impl IntoIterator<Item = Element<'a, Message>>,
+) -> Element<'a, Message> {
+    column![heading.into()].extend(body).spacing(4).into()
 }
 
 /// The face's metadata (chips, badges, progress) as one row: one size, one spacing.

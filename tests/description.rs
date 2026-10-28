@@ -37,10 +37,13 @@ fn app_with_open_card() -> (App, Id) {
     let card = app.data.boards[0].columns[0].cards[0].id;
     send(
         &mut app,
-        [Message::Select(Selection {
-            column,
-            card: Some(card),
-        })],
+        [
+            Message::Select(Selection {
+                column,
+                card: Some(card),
+            }),
+            Message::OpenCard,
+        ],
     );
     assert_eq!(app.open_card(), Some(card));
     (app, card)

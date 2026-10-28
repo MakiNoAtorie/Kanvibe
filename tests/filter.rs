@@ -358,10 +358,13 @@ fn esc_closes_the_open_card_then_clears_the_filter_then_the_selection() {
     let (todo, bug) = (column(&app, 0), id(&app, "bug 1"));
     send(
         &mut app,
-        [Message::Select(Selection {
-            column: todo,
-            card: Some(bug),
-        })],
+        [
+            Message::Select(Selection {
+                column: todo,
+                card: Some(bug),
+            }),
+            Message::OpenCard,
+        ],
     );
     // Esc the filter box captured: it only leaves the box.
     send(&mut app, [Message::LeaveField]);

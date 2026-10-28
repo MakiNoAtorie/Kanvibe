@@ -39,10 +39,13 @@ fn app_with_open_card() -> App {
     let a = app.data.boards[1].columns[0].cards[0].id;
     send(
         &mut app,
-        [Message::Select(Selection {
-            column: todo,
-            card: Some(a),
-        })],
+        [
+            Message::Select(Selection {
+                column: todo,
+                card: Some(a),
+            }),
+            Message::OpenCard,
+        ],
     );
     assert_eq!(app.open_card(), Some(a));
     app

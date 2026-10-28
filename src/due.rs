@@ -3,7 +3,7 @@
 use jiff::civil::Date;
 
 use iced::Element;
-use iced::widget::{row, text, text_input};
+use iced::widget::text_input;
 
 use crate::app::{App, Field, Message, Tone, pill};
 use crate::domain::{Card, Data, Id};
@@ -23,13 +23,11 @@ impl App {
         let id = card.id;
         let input = text_input("Due date", value)
             .id(INPUT)
-            .size(14)
+            .size(13)
+            .padding([3, 6])
             .on_input(move |t| Message::DueChanged(id, t))
             .on_submit(Message::CommitEdit);
-        row![text("Due").size(13).font(crate::app::HEADING), input]
-            .spacing(8)
-            .align_y(iced::Center)
-            .into()
+        crate::app::section(crate::app::section_heading("Due"), [input.into()])
     }
 }
 

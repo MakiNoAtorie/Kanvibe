@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::widget::text_editor::{Action, Binding, Edit, KeyPress, Motion, Status};
-use iced::widget::{button, column, container, markdown, row, space, text, text_editor};
+use iced::widget::{button, container, markdown, row, space, text, text_editor};
 use iced::{Center, Element, Font};
 
 use crate::app::{App, Field, Message};
@@ -114,7 +114,7 @@ impl App {
         // The section heading, with Edit or Done at its right: the button swaps in place.
         let header = |button| {
             row![
-                text("Description").size(13).font(crate::app::HEADING),
+                crate::app::section_heading("Description"),
                 space::horizontal(),
                 button
             ]
@@ -123,21 +123,25 @@ impl App {
         let editing =
             (self.editing.as_ref()).is_some_and(|e| e.field == Field::Description(card.id));
         let edit = match editing {
-            true => button("Done").on_press(Message::CommitEdit).into(),
+            true => button(text("Done").size(crate::app::META_SIZE))
+                .padding([2, 8])
+                .on_press(Message::CommitEdit)
+                .into(),
             false => crate::chrome::tip(
-                button("Edit")
-                    .style(crate::app::quiet)
-                    .on_press(Message::EditDescription),
+                crate::app::small_button("Edit", Message::EditDescription),
                 "Edit description (E)",
             ),
         };
         let body: Element<_> = match card.description.is_empty() {
             _ if editing => self.description_editor(),
-            true => text("No description").style(text::secondary).into(),
+            true => text("No description")
+                .size(13)
+                .style(text::secondary)
+                .into(),
             false => markdown::view(self.rendered.1.items(), markdown_settings(&theme))
                 .map(Message::OpenLink),
         };
-        column![header(edit), body].spacing(6).into()
+        crate::app::section(header(edit), [body])
     }
 
     /// The highlighted Markdown editor of the description being edited.

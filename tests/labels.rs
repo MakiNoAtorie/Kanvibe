@@ -49,10 +49,13 @@ fn app_with_cards() -> App {
     let a = card(&app, "A");
     send(
         &mut app,
-        [Message::Select(Selection {
-            column: todo,
-            card: Some(a),
-        })],
+        [
+            Message::Select(Selection {
+                column: todo,
+                card: Some(a),
+            }),
+            Message::OpenCard,
+        ],
     );
     app
 }
