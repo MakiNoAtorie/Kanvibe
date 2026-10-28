@@ -5,7 +5,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use iced::keyboard::{self, key::Named};
-use iced::{Point, Size};
+use iced::{Font, Pixels, Point, Size};
+use iced_test::core::renderer::Headless;
+use iced_test::runtime::UserInterface;
+use iced_test::runtime::user_interface::Cache;
 use kanvibe::app::{App, Field, Message, Selection};
 use kanvibe::domain::{Board, Card, Column, Data, Item, Label};
 use kanvibe::drag::{self, Target};
@@ -416,6 +419,25 @@ fn measure(table: &mut Table, boards: usize, cards: usize) {
     let _ = send(&mut app, Message::FilterChanged("fix".into()));
     table.add("view: text Filter on", mean(200, || view(&app)));
     let _ = send(&mut app, Message::ClearFilter);
+    // What the app does per message: rebuild the view and lay it out against the last cache.
+    let size = Size::new(1600.0, 900.0);
+    let mut renderer = iced_test::futures::futures::executor::block_on(
+        <iced::Renderer as Headless>::new(Font::with_name("Fira Sans"), Pixels(16.0), None),
+    )
+    .expect("a headless renderer");
+    let mut cache =
+        Some(UserInterface::build(app.view(), size, Cache::default(), &mut renderer).into_cache());
+    table.add(
+        "view + warm layout (UserInterface::build)",
+        mean(100, || {
+            timed(|| {
+                let ui =
+                    UserInterface::build(app.view(), size, cache.take().unwrap(), &mut renderer);
+                cache = Some(ui.into_cache());
+            })
+        }),
+    );
+
     // The simulator creates a renderer each time: subtract an empty view's cost.
     let empty = || {
         timed(|| {
