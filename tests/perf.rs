@@ -261,6 +261,17 @@ fn measure(table: &mut Table, boards: usize, cards: usize) {
         }),
     );
     table.add(
+        "Data clone",
+        mean(200, || timed(|| drop(std::hint::black_box(data.clone())))),
+    );
+    let copy = data.clone();
+    table.add(
+        "Data == Data (equal)",
+        mean(200, || {
+            timed(|| assert!(std::hint::black_box(&copy) == &data))
+        }),
+    );
+    table.add(
         "Data::card(last)",
         mean(1000, || timed(|| assert!(data.card(last).is_some()))),
     );

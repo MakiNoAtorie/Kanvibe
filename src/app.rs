@@ -20,6 +20,7 @@ use iced::Point;
 use iced::widget::text_editor;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub(crate) const BOARD_NAME_INPUT: &str = "board-name";
@@ -54,8 +55,9 @@ pub struct App {
     pub limit_input: Option<LimitInput>,
     /// The selected Column and, optionally, a Card in it; both outlined.
     pub selection: Option<Selection>,
-    /// The state the background writer is saving; `Some` while a save is in flight.
-    pub writing: Option<(Data, Settings)>,
+    /// The state the background writer is saving; `Some` while a save is in flight. Shared
+    /// with the `SaveJob`, so a save copies the Boards once.
+    pub writing: Option<Arc<(Data, Settings)>>,
     /// The state whose save failed. Not retried until something changes or `RetrySave`.
     pub failed: Option<(Data, Settings)>,
     /// The persistent bar: "Not saved: <path>: <OS error>". Cleared by a successful save.
@@ -142,14 +144,13 @@ pub enum Closing {
 #[derive(Debug)]
 pub struct SaveJob {
     dir: PathBuf,
-    data: Data,
-    settings: Settings,
+    state: Arc<(Data, Settings)>,
 }
 
 impl SaveJob {
     /// Writes the data file, blocking. The one place the app performs a save.
     pub fn run(self) -> Message {
-        let saved = storage::save(&self.dir, &self.data, &self.settings);
+        let saved = storage::save(&self.dir, &self.state.0, &self.state.1);
         Message::Saved(saved.map_err(|e| not_saved(&storage::file_path(&self.dir), e)))
     }
 }
@@ -756,7 +757,9 @@ impl App {
                 return self.exit_if_saved();
             }
             Message::Saved(result) => {
-                let attempted = self.writing.take();
+                // The job has dropped its share by now, so this moves rather than copies.
+                let attempted = (self.writing.take())
+                    .map(|s| Arc::try_unwrap(s).unwrap_or_else(|s| (*s).clone()));
                 match result {
                     Ok(()) => {
                         self.saved = attempted.unwrap_or_default();
@@ -2084,14 +2087,9 @@ impl App {
         if let Err(e) = storage::rotate(&dir, &mut self.rotation, changed) {
             eprintln!("Backups not rotated: {e}");
         }
-        let state = (self.data.clone(), settings);
-        self.writing = Some(state.clone());
-        let (data, settings) = state;
-        Some(SaveJob {
-            dir,
-            data,
-            settings,
-        })
+        let state = Arc::new((self.data.clone(), settings));
+        self.writing = Some(Arc::clone(&state));
+        Some(SaveJob { dir, state })
     }
 
     /// Exits once a requested close has nothing left to save and no save in flight;
