@@ -54,7 +54,37 @@ pub fn delete_prompt(data: &Data, label: Id) -> Option<String> {
     (n > 0).then(|| format!("Delete Label \"{name}\"? It is on {}.", cards(n)))
 }
 
+/// Capture's `#label` syntax: each word `#name` naming one of `labels` (case-insensitive) is
+/// taken out of `title`; the rest is rejoined with single spaces. Unmatched words, and a `#`
+/// inside a word (`C#`, `item#3`), stay. Returns the clean title and the matched Label IDs.
+pub fn label_tokens(title: &str, labels: &[Label]) -> (String, Vec<Id>) {
+    let mut ids = Vec::new();
+    let mut words = Vec::new();
+    for word in title.split_whitespace() {
+        let name = word.strip_prefix('#').map(str::to_lowercase);
+        match name.and_then(|n| labels.iter().find(|l| l.name.to_lowercase() == n)) {
+            Some(label) if !ids.contains(&label.id) => ids.push(label.id),
+            Some(_) => {}
+            None => words.push(word),
+        }
+    }
+    (words.join(" "), ids)
+}
+
 impl Data {
+    /// A Capture box title: `add_card` with its `#label` words (see `label_tokens`) attached
+    /// instead. A title of only such words creates nothing.
+    pub(crate) fn add_captured(&mut self, column: Id, title: &str) -> Option<Id> {
+        let board = self.board_of_column(column)?;
+        let labels = &self.boards.iter().find(|b| b.id == board)?.labels;
+        let (title, ids) = label_tokens(title, labels);
+        let card = self.add_card(column, &title)?;
+        for label in ids {
+            self.toggle_label(card, label);
+        }
+        Some(card)
+    }
+
     pub fn label(&self, id: Id) -> Option<&Label> {
         self.boards
             .iter()

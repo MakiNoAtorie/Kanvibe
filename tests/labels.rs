@@ -562,3 +562,32 @@ fn a_card_without_labels_offers_to_add_one_in_the_panel() {
             .is_err()
     );
 }
+
+#[test]
+fn hash_tokens_naming_a_label_attach_it_and_leave_the_title() {
+    let label = |id, name: &str| kanvibe::domain::Label {
+        id,
+        name: name.into(),
+        color: "red".into(),
+    };
+    let board = [label(1, "Bug"), label(2, "urgent")];
+    let table: [(&str, &str, &[Id]); 10] = [
+        ("Fix login #bug", "Fix login", &[1]),
+        ("#urgent Fix #Bug login", "Fix login", &[2, 1]),
+        ("Fix #typo now", "Fix #typo now", &[]),
+        ("Fix #BUG", "Fix", &[1]),
+        ("Learn C# today", "Learn C# today", &[]),
+        ("See item#3", "See item#3", &[]),
+        ("#bug #urgent", "", &[1, 2]),
+        ("  Fix   #bug   login  ", "Fix login", &[1]),
+        ("Fix # alone", "Fix # alone", &[]),
+        ("#bug twice #bug", "twice", &[1]),
+    ];
+    for (title, clean, ids) in table {
+        assert_eq!(
+            labels::label_tokens(title, &board),
+            (clean.to_string(), ids.to_vec()),
+            "{title}"
+        );
+    }
+}

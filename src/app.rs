@@ -1085,7 +1085,7 @@ impl App {
         capture.text.clear();
         let column = capture.column;
         for line in lines {
-            if let Some(card) = self.data.add_card(column, line) {
+            if let Some(card) = self.data.add_captured(column, line) {
                 let card = Some(card);
                 self.selection = Some(Selection { column, card });
                 if self.filter.is_on() {
@@ -1139,7 +1139,7 @@ impl App {
     pub fn commit_pending(&mut self) -> bool {
         let mut recorded = false;
         if let Some(capture) = self.capture.take() {
-            if let Some(card) = self.data.add_card(capture.column, &capture.text) {
+            if let Some(card) = self.data.add_captured(capture.column, &capture.text) {
                 let description = capture.description.trim();
                 if !description.is_empty() {
                     self.data.set_description(card, description);

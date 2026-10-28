@@ -818,6 +818,59 @@ fn pasting_several_lines_into_the_capture_box_adds_one_card_per_line_as_one_step
     assert_eq!(app.capture.as_ref().map(|c| c.text.as_str()), Some("one"));
 }
 
+/// `app_with_board` with Labels "Bug" and "Urgent" on the Board; returns their IDs.
+fn app_with_labels() -> (App, Id, Id) {
+    let mut app = app_with_board();
+    let board = app.data.boards[0].id;
+    let bug = app.data.add_label(board, "Bug", "red").unwrap();
+    let urgent = app.data.add_label(board, "Urgent", "blue").unwrap();
+    app.history = Default::default();
+    (app, bug, urgent)
+}
+
+fn card_labels(app: &App, index: usize) -> Vec<Vec<Id>> {
+    let cards = &app.data.boards[0].columns[index].cards;
+    cards.iter().map(|c| c.labels.clone()).collect()
+}
+
+#[test]
+fn a_hash_label_in_the_capture_box_attaches_it_and_one_undo_removes_both() {
+    let (mut app, bug, _) = app_with_labels();
+    let todo = column_id(&app, 0);
+    capture(&mut app, todo, &["Fix login #bug", "Fix #typo"]);
+    assert_eq!(card_titles(&app, 0), ["Fix login", "Fix #typo"]);
+    assert_eq!(card_labels(&app, 0), [vec![bug], vec![]]);
+    send(&mut app, [Message::Escape, Message::Undo]);
+    assert_eq!(card_titles(&app, 0), ["Fix login"]);
+    send(&mut app, [Message::Undo]);
+    assert!(card_titles(&app, 0).is_empty());
+}
+
+#[test]
+fn a_capture_title_of_only_label_tokens_creates_nothing() {
+    let (mut app, _, _) = app_with_labels();
+    let todo = column_id(&app, 0);
+    capture(&mut app, todo, &["#bug", "  #Bug #urgent "]);
+    assert!(card_titles(&app, 0).is_empty());
+}
+
+#[test]
+fn a_multi_line_paste_labels_each_line() {
+    let (mut app, bug, urgent) = app_with_labels();
+    let todo = column_id(&app, 0);
+    send(
+        &mut app,
+        [
+            Message::OpenCapture(todo),
+            Message::CaptureLines(Some("a #bug\n#urgent b #Bug\n#bug\nc".into())),
+        ],
+    );
+    assert_eq!(card_titles(&app, 0), ["a", "b", "c"]);
+    assert_eq!(card_labels(&app, 0), [vec![bug], vec![urgent, bug], vec![]]);
+    send(&mut app, [Message::Escape, Message::Undo]);
+    assert!(card_titles(&app, 0).is_empty());
+}
+
 #[test]
 fn the_capture_box_placeholder_states_enter_and_esc() {
     let mut app = app_with_board();
