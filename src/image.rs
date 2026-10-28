@@ -7,7 +7,7 @@ use std::time::Duration;
 use iced::widget::{column, container, row, text};
 use iced::{Element, Fill, Padding, Task, Theme};
 
-use crate::app::{App, Message, card_face};
+use crate::app::{App, HEADING, Message, card_face, count_badge};
 use crate::domain::Board;
 use crate::filter::Filter;
 
@@ -92,15 +92,9 @@ pub fn render(board: &Board, filter: &Filter, theme: &Theme) -> Result<Vec<u8>, 
 /// Bottom padding is left off (the crop adds it back), so an overflow reaches the last row.
 fn view(s: &Snapshot) -> Element<'_, Message> {
     let columns = s.board.columns.iter().map(|col| {
-        let count = text(
-            s.filter
-                .count_label(col, |c| s.filter.matches(c, &s.board.labels)),
-        );
-        let count = match col.over_limit() {
-            true => count.style(text::danger),
-            false => count,
-        };
-        let header = row![text(&col.name).size(16).width(Fill), count].spacing(8);
+        let shown = |c: &_| s.filter.matches(c, &s.board.labels);
+        let count = count_badge(s.filter.count_label(col, shown), col.over_limit());
+        let header = row![text(&col.name).size(16).font(HEADING).width(Fill), count].spacing(8);
         let cards = col
             .cards
             .iter()
@@ -118,7 +112,7 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
             .into()
     });
     column![
-        text(&s.board.name).size(20),
+        text(&s.board.name).size(20).font(HEADING),
         row(columns).spacing(SPACING as f32)
     ]
     .spacing(12)

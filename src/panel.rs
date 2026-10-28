@@ -1,6 +1,6 @@
 //! The Card panel: 400px on the right of the Board, showing the open Card.
-use iced::widget::{button, column, container, row, space, text};
-use iced::{Center, Element, Fill};
+use iced::widget::{button, column, container, row, text};
+use iced::{Element, Fill};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
@@ -29,8 +29,9 @@ impl App {
             local_time(&card.created, &tz),
             local_time(&card.updated, &tz)
         );
+        // The title takes the row; ✕ stays at its top right however many lines it wraps to.
         let header = row![
-            space::horizontal(),
+            self.editable_name(Field::CardTitle(card.id), &card.title, 20),
             tip(
                 button("✕")
                     .style(button::text)
@@ -38,24 +39,23 @@ impl App {
                 "Close (Esc)"
             )
         ]
-        .align_y(Center);
+        .spacing(8);
         container(
             column![
                 header,
-                self.editable_name(Field::CardTitle(card.id), &card.title, 20),
                 self.labels_row(card),
                 self.view_description(card),
                 self.view_checklist(card),
                 row![
                     tip(
                         button("Move to Board…")
-                            .style(button::secondary)
+                            .style(crate::app::quiet)
                             .on_press(Message::OpenMove),
                         "Move to Board (M)"
                     ),
                     tip(
                         button("Archive Card")
-                            .style(button::secondary)
+                            .style(crate::app::quiet)
                             .on_press(Message::ArchiveCard(card.id)),
                         "Archive Card (Del)"
                     ),
@@ -63,7 +63,7 @@ impl App {
                 .spacing(8),
                 text(times).size(12),
             ]
-            .spacing(12),
+            .spacing(16),
         )
         .width(WIDTH)
         .height(Fill)

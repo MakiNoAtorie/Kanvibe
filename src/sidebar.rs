@@ -1,13 +1,13 @@
 //! The left sidebar: active Boards, the collapsed "Archived (n)" section and the footer.
 use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
-use iced::{Border, Center, Color, Element, Fill, Theme};
+use iced::{Border, Center, Color, Element, Fill, Padding, Theme};
 
-use crate::app::{App, Message, board_name_input, clipped_text};
+use crate::app::{App, Message, board_name_input, clipped, clipped_text};
 use crate::domain::{Board, Id};
 use crate::drag::{self, Drag, Item, Target};
 
-const WIDTH: u32 = 220;
-const RAIL: u32 = 40;
+pub(crate) const WIDTH: u32 = 220;
+pub(crate) const RAIL: u32 = 40;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let toggle = |label| {
@@ -53,14 +53,18 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .style(button::text)
             .on_press(Message::ToggleArchivedBoards);
         let rows = archived.iter().filter(|_| app.archived_open).map(|b| {
-            row![
-                clipped_text(b.name.as_str()).width(Fill),
+            // Indented to line up with the Board names above; muted, as they are archived.
+            let name = text(b.name.as_str())
+                .style(text::secondary)
+                .wrapping(text::Wrapping::None);
+            let row = row![
+                clipped(name, text(b.name.as_str())).width(Fill),
                 small("Restore", Message::RestoreBoard(b.id)),
                 small("Delete", Message::AskDeleteBoard(b.id)),
             ]
             .spacing(4)
-            .align_y(Center)
-            .into()
+            .align_y(Center);
+            container(row).padding(Padding::ZERO.left(10)).into()
         });
         column![heading].extend(rows).spacing(4)
     });
@@ -78,7 +82,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             row![space::horizontal(), toggle("«")],
             scrollable(list.spacing(12)).height(Fill),
             footer,
-            button("Import Board…")
+            // 13px with the footer's other occasional links; "+ New Board" stays full size.
+            button(text("Import Board…").size(13))
                 .style(button::text)
                 .on_press(Message::ImportBoard),
             crate::chrome::footer(app),
@@ -109,10 +114,19 @@ fn gap<'a>(
 /// An active Board's row: its name, highlighted when current; a click opens it.
 /// Kept small so drag and drop can wrap it as a drop target.
 pub fn board_row(board: &Board, current: bool) -> Element<'_, Message> {
-    let style = if current {
-        button::primary
-    } else {
-        button::text
+    // The current Board is marked with the weak primary shade, not a solid fill that would
+    // outshine the Board itself.
+    let style = move |theme: &Theme, status| match current {
+        true => {
+            let pair = theme.extended_palette().primary.weak;
+            button::Style {
+                background: Some(pair.color.into()),
+                text_color: pair.text,
+                border: Border::default().rounded(4),
+                ..button::Style::default()
+            }
+        }
+        false => button::text(theme, status),
     };
     // No `on_press`: the button must not capture the press the drag source needs. A press
     // released under the drag threshold opens the Board (see `Message::DragEnd`).
@@ -146,7 +160,7 @@ fn drop_row<'a>(row: Element<'a, Message>, board: Id, drag: &Drag) -> Element<'a
 
 fn small(label: &str, message: Message) -> Element<'_, Message> {
     button(text(label).size(12))
-        .style(button::secondary)
+        .style(crate::app::quiet)
         .padding([2, 6])
         .on_press(message)
         .into()

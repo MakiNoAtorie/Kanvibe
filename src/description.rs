@@ -73,6 +73,20 @@ pub(crate) fn face_icon<'a>(card: &Card) -> Option<Element<'a, Message>> {
     (!card.description.is_empty()).then(|| text("≡").style(text::secondary).into())
 }
 
+/// iced's Markdown style with inline code on the weak background in the theme's text colour,
+/// instead of a black box (loud in the light theme).
+fn markdown_settings(theme: &iced::Theme) -> markdown::Settings {
+    let palette = theme.extended_palette();
+    markdown::Settings::with_style(markdown::Style {
+        inline_code_highlight: markdown::Highlight {
+            background: palette.background.weak.color.into(),
+            border: iced::Border::default().rounded(4),
+        },
+        inline_code_color: palette.background.weak.text,
+        ..markdown::Style::from_palette(theme.palette())
+    })
+}
+
 impl App {
     /// Re-parses the open Card's description for the rendered view when it changed.
     /// Runs after every `update`.
@@ -87,6 +101,15 @@ impl App {
     /// The panel's description: rendered with an Edit button, or the highlighted editor.
     pub(crate) fn view_description<'a>(&'a self, card: &'a Card) -> Element<'a, Message> {
         let theme = self.theme();
+        // The section heading, with Edit or Done at its right: the button swaps in place.
+        let header = |button| {
+            row![
+                text("Description").size(13).font(crate::app::HEADING),
+                space::horizontal(),
+                button
+            ]
+            .align_y(Center)
+        };
         if self
             .editing
             .as_ref()
@@ -100,27 +123,21 @@ impl App {
                 .font(Font::MONOSPACE)
                 .min_height(160)
                 .highlight("md", self.highlighter_theme());
-            let done = button("Done").on_press(Message::CommitEdit);
-            return column![editor, row![space::horizontal(), done]]
-                .spacing(6)
-                .into();
+            let done: Element<_> = button("Done").on_press(Message::CommitEdit).into();
+            return column![header(done), editor].spacing(6).into();
         }
         let edit = crate::chrome::tip(
             button("Edit")
-                .style(button::secondary)
+                .style(crate::app::quiet)
                 .on_press(Message::EditDescription),
             "Edit description (E)",
         );
         let body: Element<_> = match card.description.is_empty() {
             true => text("No description").style(text::secondary).into(),
-            false => markdown::view(self.rendered.1.items(), &theme).map(Message::OpenLink),
+            false => markdown::view(self.rendered.1.items(), markdown_settings(&theme))
+                .map(Message::OpenLink),
         };
-        column![
-            row![text("Description"), space::horizontal(), edit].align_y(Center),
-            body
-        ]
-        .spacing(6)
-        .into()
+        column![header(edit), body].spacing(6).into()
     }
 
     /// Wraps the selection in `markup`, or inserts the markers with the cursor between them.

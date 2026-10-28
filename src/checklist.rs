@@ -13,7 +13,7 @@ impl App {
             Some(p) => format!("Checklist {p}"),
             None => "Checklist".into(),
         };
-        column![text(heading).size(14)]
+        column![text(heading).size(13).font(crate::app::HEADING)]
             .extend(items)
             .push(
                 button("+ Add Checklist Item")
@@ -37,7 +37,7 @@ impl App {
                 .into(),
         };
         let small = |label, message| {
-            button(text(label).size(12))
+            button(text(label).size(12).style(text::secondary))
                 .style(button::text)
                 .on_press(message)
         };
@@ -53,7 +53,7 @@ impl App {
                 "Move down"
             ),
             tip(
-                small("×", Message::RemoveItem(item.id)),
+                small("✕", Message::RemoveItem(item.id)),
                 "Remove Checklist Item"
             ),
         ]

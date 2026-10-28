@@ -2,7 +2,7 @@
 use iced::widget::{
     button, checkbox, column, container, operation, row, scrollable, space, text, text_input,
 };
-use iced::{Border, Center, Color, Element, Fill, Task};
+use iced::{Border, Center, Color, Element, Task};
 
 use crate::app::{App, Confirm, EDIT_INPUT, Field, Message, dialog, dialog_header};
 use crate::domain::{Board, Card, Data, Id, Label, cards, now};
@@ -331,7 +331,7 @@ impl App {
         };
         let shown: Element<_> = chips.unwrap_or_else(|| text("+ Add Label").size(12).into());
         row![
-            text("Labels").size(12),
+            text("Labels").size(13).font(crate::app::HEADING),
             crate::chrome::tip(
                 button(shown)
                     .style(button::text)
@@ -352,12 +352,13 @@ impl App {
         };
         let header = dialog_header("Labels", Message::CloseLabels);
         let rows = self.picker_rows(board, &card.labels, Message::ToggleLabel, Some(picker));
-        let list = scrollable(rows).height(Fill);
+        // The list scrolls past 360px; the dialog wraps its content instead of filling the window.
+        let list = container(scrollable(rows)).max_height(360);
         let body = column![header, list, self.new_label_form(board, picker)].spacing(12);
-        dialog(container(body).width(360).max_height(520))
+        dialog(container(body).width(360))
     }
 
-    /// One row per Label of `board`: a checkbox that sends `toggle(id)`. With `editing` there is
+    /// One row per Label of `board`: its colour dot and a checkbox that sends `toggle(id)`. With `editing` there is
     /// also a pencil per Label opening its rename / recolour / delete editor. The Filter reuses
     /// this with `None`.
     pub(crate) fn picker_rows<'a>(
@@ -369,12 +370,19 @@ impl App {
     ) -> Element<'a, Message> {
         let rows = board.labels.iter().map(|label| {
             let id = label.id;
+            // A colour dot, not a chip: the checkbox already shows the full name.
+            let color = swatch(&label.color);
+            let dot = container(space().width(12).height(12)).style(move |_| container::Style {
+                background: Some(color.into()),
+                border: Border::default().rounded(6),
+                ..Default::default()
+            });
             let mut line = row![
+                dot,
                 checkbox(checked.contains(&id))
                     .label(label.name.as_str())
                     .on_toggle(move |_| toggle(id)),
                 space::horizontal(),
-                chip(label),
             ]
             .spacing(8)
             .align_y(Center);
@@ -432,7 +440,7 @@ impl App {
     ) -> Element<'a, Message> {
         let Some(new) = &picker.new else {
             return button("+ New Label")
-                .style(button::secondary)
+                .style(crate::app::quiet)
                 .on_press(Message::NewLabel)
                 .into();
         };

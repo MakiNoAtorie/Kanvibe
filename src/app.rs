@@ -1283,15 +1283,26 @@ impl App {
         size: u32,
         drag: Option<Item>,
     ) -> Element<'a, Message> {
+        // Board and Column names are headings; Card titles stay body text.
+        let font = match field {
+            Field::BoardName(_) | Field::ColumnName(_) => HEADING,
+            _ => iced::Font::DEFAULT,
+        };
         match &self.editing {
             Some(edit) if edit.field == field => text_input("Name", &edit.text)
                 .id(EDIT_INPUT)
                 .size(size)
+                .font(font)
                 .on_input(Message::EditChanged)
                 .on_submit(Message::CommitEdit)
                 .into(),
             _ => {
-                let label = mouse_area(text(name).size(size).wrapping(text::Wrapping::None))
+                // The open Card's title wraps: the panel is where it is read in full.
+                let wrapping = match field {
+                    Field::CardTitle(_) => text::Wrapping::Word,
+                    _ => text::Wrapping::None,
+                };
+                let label = mouse_area(text(name).size(size).font(font).wrapping(wrapping))
                     .on_double_click(Message::StartEdit(field));
                 let label = match drag {
                     Some(item) => label
@@ -1339,7 +1350,7 @@ impl App {
                     row![
                         text(error).width(Fill),
                         button("Retry now")
-                            .style(button::secondary)
+                            .style(quiet)
                             .on_press_maybe(self.writing.is_none().then_some(Message::RetrySave)),
                     ]
                     .spacing(8)
@@ -1384,6 +1395,7 @@ impl App {
     fn view_close_dialog(&self) -> Element<'_, Message> {
         let idle = |message| self.writing.is_none().then_some(message);
         let buttons = row![
+            iced::widget::space::horizontal(),
             button("Retry").on_press_maybe(idle(Message::RetrySave)),
             button("Save a copy as…").on_press_maybe(idle(Message::SaveCopy)),
             button("Quit without saving").on_press_maybe(idle(Message::QuitWithoutSaving)),
@@ -1395,7 +1407,7 @@ impl App {
             buttons
         ]
         .spacing(12)
-        .max_width(560);
+        .width(560);
         dialog(panel)
     }
 
@@ -1414,58 +1426,91 @@ impl App {
         columns.extend([
             gap(board.columns.len()),
             button("+ Add Column")
-                .style(button::secondary)
+                .style(quiet)
                 .on_press(Message::AddColumn(board.id))
                 .into(),
         ]);
-        let header = row![
-            self.editable_name(Field::BoardName(board.id), &board.name, 20),
-            self.filter_bar(),
-            button(text(format!("Archive ({})", board.archived_cards.len())))
-                .style(button::secondary)
-                .on_press(Message::OpenArchive),
-            crate::chrome::tip(
-                button("⋯")
-                    .style(button::text)
-                    .on_press(Message::ToggleBoardMenu),
-                "Board menu"
-            ),
-        ]
-        .spacing(8)
-        .align_y(Center);
+        let name = self.editable_name(Field::BoardName(board.id), &board.name, 20);
+        let archive = button(
+            text(format!("Archive ({})", board.archived_cards.len()))
+                .wrapping(text::Wrapping::None),
+        )
+        .style(quiet)
+        .on_press(Message::OpenArchive);
+        let menu_button = crate::chrome::tip(
+            button("⋯")
+                .style(button::text)
+                .on_press(Message::ToggleBoardMenu),
+            "Board menu",
+        );
+        // A narrow Board area puts the filter on its own line, so the name, Archive and ⋯
+        // keep their room.
+        let header: Element<_> = if self.board_width() < NARROW {
+            column![
+                row![name, archive, menu_button].spacing(8).align_y(Center),
+                self.filter_bar(Fill),
+            ]
+            .spacing(8)
+            .into()
+        } else {
+            row![name, self.filter_bar(220.into()), archive, menu_button]
+                .spacing(8)
+                .align_y(Center)
+                .into()
+        };
         let menu = self.board_menu.then(|| {
             row![
                 button("Rename")
-                    .style(button::secondary)
+                    .style(quiet)
                     .on_press(Message::StartEdit(Field::BoardName(board.id))),
                 button("Export Board…")
-                    .style(button::secondary)
+                    .style(quiet)
                     .on_press(Message::ExportBoard(board.id)),
                 button(match self.saving_image {
                     true => "Saving image…",
                     false => "Save as image…",
                 })
-                .style(button::secondary)
+                .style(quiet)
                 .on_press_maybe((!self.saving_image).then_some(Message::SaveImage(board.id))),
                 button("Archive Board")
-                    .style(button::secondary)
+                    .style(quiet)
                     .on_press(Message::ArchiveBoard(board.id)),
             ]
             .spacing(8)
-            .into()
         });
+        // Under the ⋯ that opened it.
+        let menu = menu.map(|m| container(m).align_right(Fill).into());
         column![header]
             .extend(menu)
             .extend(self.filter_lines(board))
             .push(
+                // Embedded scrollbars take their own lane instead of covering the content.
                 scrollable(row(columns).height(Fill))
                     .id(BOARD_SCROLL)
-                    .horizontal()
+                    .direction(widget::scrollable::Direction::Horizontal(scrollbar(8)))
                     .height(Fill),
             )
             .spacing(12)
             .padding(12)
             .into()
+    }
+
+    /// The Board area's width (window less sidebar and panel); unbounded before the window
+    /// reports a size.
+    fn board_width(&self) -> f32 {
+        let Some(size) = self.window.size() else {
+            return f32::INFINITY;
+        };
+        let sidebar = match (self.data.boards.is_empty(), self.sidebar_collapsed) {
+            (true, _) => 0,
+            (false, true) => crate::sidebar::RAIL,
+            (false, false) => crate::sidebar::WIDTH,
+        };
+        let panel = match self.panel {
+            Some(_) => crate::panel::WIDTH,
+            None => 0.0,
+        };
+        size.width - sidebar as f32 - panel
     }
 
     fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
@@ -1481,12 +1526,27 @@ impl App {
         // Hidden Cards are skipped but keep their index: drop slots are positions in all Cards.
         let shown = col.cards.iter().enumerate().filter(|(_, c)| self.shown(c));
         let cards = shown.map(|(i, card)| {
+            let outline = outlined(
+                container::bordered_box,
+                selection.is_some_and(|s| s.card == Some(card.id)),
+            );
+            // The Card being dragged stays in place, its text faded under the ghost.
+            let lifted = self
+                .drag
+                .as_ref()
+                .is_some_and(|d| d.started && d.item == Item::Card(card.id));
             let card_box = card_face(self.board(), card)
                 .id(card_widget(card.id))
-                .style(outlined(
-                    container::bordered_box,
-                    selection.is_some_and(|s| s.card == Some(card.id)),
-                ));
+                .style(move |theme| {
+                    let style = outline(theme);
+                    match lifted {
+                        true => container::Style {
+                            text_color: style.text_color.map(|c| c.scale_alpha(0.4)),
+                            ..style
+                        },
+                        false => style,
+                    }
+                });
             // Indicator above, padding below: Card slots touch, so no gap between them
             // falls through to the Column body.
             let slot = container(column![drag::indicator(gap == Some(i)), card_box].spacing(2))
@@ -1514,15 +1574,10 @@ impl App {
                 "Add Card (N)",
             ),
         };
-        let count = text(self.count_label(col));
-        let count = if col.over_limit() {
-            count.style(text::danger)
-        } else {
-            count
-        };
+        let count = count_badge(self.count_label(col), col.over_limit());
         let count = match col.limit_tip() {
             Some(tip) => crate::chrome::tip(count, tip),
-            None => count.into(),
+            None => count,
         };
         // Dragged by the header only; the name label forwards the press (it captures its own).
         let item = Item::Column(col.id);
@@ -1557,16 +1612,24 @@ impl App {
                 .into(),
             ),
             _ if self.column_menu == Some(col.id) => Some(
+                // Full-width 14px items, so the menu reads as one block and Remove fits one line.
                 column![
-                    button("Rename")
-                        .style(button::secondary)
+                    button(text("Rename").size(14))
+                        .style(quiet)
+                        .width(Fill)
                         .on_press(Message::StartEdit(Field::ColumnName(col.id))),
-                    button("Set limit…")
-                        .style(button::secondary)
+                    button(text("Set limit…").size(14))
+                        .style(quiet)
+                        .width(Fill)
                         .on_press(Message::OpenLimit(col.id)),
-                    button(text(crate::archive::remove_column_text(col)))
-                        .style(button::secondary)
-                        .on_press(Message::RemoveColumn(col.id)),
+                    button(
+                        text(crate::archive::remove_column_text(col))
+                            .size(14)
+                            .style(text::danger),
+                    )
+                    .style(quiet)
+                    .width(Fill)
+                    .on_press(Message::RemoveColumn(col.id)),
                 ]
                 .spacing(4)
                 .into(),
@@ -1579,6 +1642,7 @@ impl App {
                 .push(
                     scrollable(column(cards))
                         .id(cards_widget(col.id))
+                        .direction(widget::scrollable::Direction::Vertical(scrollbar(6)))
                         .height(Fill),
                 )
                 .push(footer)
@@ -1613,6 +1677,14 @@ impl App {
             .align_x(Center)
             .into(),
         };
+        // First run: the app's name above the one thing to do.
+        let content: Element<_> = match self.data.boards.is_empty() {
+            true => column![text("Kanvibe").size(28).font(HEADING), content]
+                .spacing(12)
+                .align_x(Center)
+                .into(),
+            false => content,
+        };
         center(content).into()
     }
 }
@@ -1634,19 +1706,39 @@ pub(crate) fn card_face<'a>(
         .extend(chips)
         .extend(
             card.progress()
-                .map(|p| text(format!("☑ {p}")).size(12).into()),
+                // ✓, not ☑: that renders as a colour emoji competing with the chips.
+                .map(|p| text(format!("✓ {p}")).size(12).into()),
         ),
     )
     .width(Fill)
     .padding(8)
 }
 
+/// A Column's count; over its limit, a danger-coloured pill that reads in both themes.
+/// Shared by the Board view and the image export.
+pub(crate) fn count_badge<'a>(label: String, over: bool) -> Element<'a, Message> {
+    if !over {
+        return text(label).into();
+    }
+    container(text(label))
+        .padding([0, 6])
+        .style(|theme: &Theme| {
+            let pair = theme.extended_palette().danger.base;
+            container::Style {
+                background: Some(pair.color.into()),
+                text_color: Some(pair.text),
+                border: iced::Border::default().rounded(8),
+                ..container::Style::default()
+            }
+        })
+        .into()
+}
+
 /// A confirmation: the question, Cancel (as Esc) and the confirm button.
 fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
     let buttons = row![
-        button("Cancel")
-            .style(button::secondary)
-            .on_press(Message::Escape),
+        iced::widget::space::horizontal(),
+        button("Cancel").style(quiet).on_press(Message::Escape),
         button("Delete")
             .style(button::danger)
             .on_press(Message::Confirm),
@@ -1655,7 +1747,7 @@ fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
     dialog(
         column![text(&confirm.prompt), buttons]
             .spacing(12)
-            .max_width(480),
+            .width(480),
     )
 }
 
@@ -1664,7 +1756,7 @@ pub(crate) fn clipped<'a>(
     line: impl Into<Element<'a, Message>>,
     full: impl Into<Element<'a, Message>>,
 ) -> container::Container<'a, Message> {
-    let full = container(full).padding(4).style(container::rounded_box);
+    let full = container(full).padding(4).style(container::bordered_box);
     container(tooltip(line, full, tooltip::Position::Bottom)).clip(true)
 }
 
@@ -1764,6 +1856,45 @@ fn reveal(scrollable: widget::Id, child: widget::Id, horizontal: bool) -> Task<M
     })
 }
 
+/// A `width`-px scrollbar embedded 4px from the content it scrolls.
+fn scrollbar(width: u32) -> widget::scrollable::Scrollbar {
+    widget::scrollable::Scrollbar::new()
+        .width(width)
+        .scroller_width(width)
+        .spacing(4)
+}
+
+/// The secondary button: weakest background, 1px strong border, weak background on hover.
+pub(crate) fn quiet(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let base = button::Style {
+        background: Some(palette.background.weakest.color.into()),
+        text_color: palette.background.weakest.text,
+        border: iced::Border {
+            color: palette.background.strong.color,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    };
+    match status {
+        button::Status::Active => base,
+        button::Status::Hovered | button::Status::Pressed => button::Style {
+            background: Some(palette.background.weak.color.into()),
+            ..base
+        },
+        // As iced's own disabled buttons: everything at half strength.
+        button::Status::Disabled => button::Style {
+            background: Some(palette.background.weakest.color.scale_alpha(0.5).into()),
+            text_color: base.text_color.scale_alpha(0.5),
+            border: base
+                .border
+                .color(palette.background.strong.color.scale_alpha(0.5)),
+            ..base
+        },
+    }
+}
+
 /// `base`, with a 2px primary-colour border when `selected`.
 fn outlined(
     base: fn(&Theme) -> container::Style,
@@ -1782,6 +1913,13 @@ fn outlined(
 }
 
 const BOARD_SCROLL: &str = "board";
+/// Board and Column names (the image export's too).
+pub(crate) const HEADING: iced::Font = iced::Font {
+    weight: iced::font::Weight::Semibold,
+    ..iced::Font::DEFAULT
+};
+/// Below this Board-area width the header's filter moves to its own line.
+const NARROW: f32 = 640.0;
 
 fn column_widget(column: Id) -> widget::Id {
     widget::Id::from(format!("column-{column}"))

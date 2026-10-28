@@ -181,7 +181,18 @@ pub fn ghost(title: &str, cursor: Point) -> Element<'_, Message> {
     let card = container(text(title))
         .width(264)
         .padding(8)
-        .style(container::bordered_box);
+        .style(|theme: &Theme| {
+            let base = container::bordered_box(theme);
+            container::Style {
+                border: base.border.color(theme.palette().primary),
+                shadow: iced::Shadow {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                    offset: Vector::new(0.0, 4.0),
+                    blur_radius: 12.0,
+                },
+                ..base
+            }
+        });
     pin(card).position(cursor - Vector::new(24.0, 16.0)).into()
 }
 

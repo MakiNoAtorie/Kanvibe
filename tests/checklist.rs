@@ -293,5 +293,5 @@ fn checklist_progress_shows_in_the_panel_heading_and_on_the_card() {
     send(&mut app, [Message::ToggleItem(first)]);
     let mut ui = iced_test::simulator(app.view());
     assert!(ui.find("Checklist 1/3").is_ok());
-    assert!(ui.find("☑ 1/3").is_ok());
+    assert!(ui.find("✓ 1/3").is_ok());
 }

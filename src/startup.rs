@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use iced::widget::{button, center, column, container, row, text};
+use iced::widget::{button, center, column, container, row, space, text};
 use iced::{Element, Subscription, Task};
 
 use crate::app::{self, App};
@@ -141,7 +141,9 @@ impl Problem {
     // ponytail: a centred panel, not a `stack` overlay: nothing is loaded to show beneath it.
     fn view(&self) -> Element<'_, Message> {
         let path = storage::file_path(&self.dir);
-        let quit = button("Quit").on_press(Message::Quit);
+        // Quit is the quiet way out; the one recovery action keeps the primary style.
+        let quit = button("Quit").style(app::quiet).on_press(Message::Quit);
+        let mut file = None;
         let (title, detail, buttons) = match &self.error {
             LoadError::Newer => (
                 "Install the newer version".to_owned(),
@@ -149,7 +151,7 @@ impl Problem {
                     "{} was saved by a newer version of Kanvibe. Install the newer version to open it.",
                     path.display()
                 ),
-                row![quit],
+                row![button("Quit").on_press(Message::Quit)],
             ),
             LoadError::Io(e) => (
                 "Can't open the data file".to_owned(),
@@ -162,18 +164,35 @@ impl Problem {
                     let label = format!("Restore from backup ({})", local_date(modified));
                     buttons = buttons.push(button(text(label)).on_press(Message::Restore));
                 }
+                // Start empty is the recovery action only when there is no backup.
+                let start_style = match self.backup {
+                    Some(_) => app::quiet,
+                    None => button::primary,
+                };
+                file = Some(path.display().to_string());
                 (
                     "The data file can't be read".to_owned(),
-                    format!("{}\n{e}", path.display()),
+                    e.to_string(),
                     buttons
-                        .push(button("Start empty").on_press(Message::StartEmpty))
+                        .push(
+                            button("Start empty")
+                                .style(start_style)
+                                .on_press(Message::StartEmpty),
+                        )
                         .push(quit),
                 )
             }
         };
-        let panel = column![text(title).size(20), text(detail), buttons.spacing(8)]
+        // The unreadable file's path on its own muted line, above what went wrong; a fixed
+        // width, so the right-aligned buttons don't stretch the panel.
+        let file = file.map(|f: String| text(f).size(13).style(text::secondary).into());
+        let buttons = row![space::horizontal()].push(buttons.spacing(8));
+        let panel = column![text(title).size(20)]
+            .extend(file)
+            .push(text(detail))
+            .push(buttons)
             .spacing(12)
-            .max_width(560);
+            .width(560);
         center(container(panel).padding(20).style(container::rounded_box)).into()
     }
 }

@@ -3,7 +3,7 @@
 //! [`placement`] are plain domain code; `App::shown` adds the selected and just-created Cards.
 //! The Filter is never saved and is cleared on a Board switch.
 use iced::widget::{button, container, operation, row, text, text_input};
-use iced::{Center, Element, Task};
+use iced::{Center, Element, Fill, Task};
 
 use crate::app::{App, Message, Selection};
 use crate::domain::{Board, Card, Column, Id, Label};
@@ -114,16 +114,25 @@ impl App {
         self.filter.is_on() && !cards.any(|c| self.filter.matches(c, &board.labels))
     }
 
-    /// The Board header's filter controls: the text box with ×, and the Labels button.
-    pub(crate) fn filter_bar(&self) -> Element<'_, Message> {
-        let clear = self.filter.is_on().then(|| {
-            crate::chrome::tip(
-                button("×")
-                    .style(button::text)
-                    .on_press(Message::ClearFilter),
-                "Clear filter",
-            )
-        });
+    /// The Board header's filter controls: the text box with ✕, and the Labels button.
+    /// `width` is the text box's: 220 px, or `Fill` on its own line in a narrow Board.
+    pub(crate) fn filter_bar(&self, width: iced::Length) -> Element<'_, Message> {
+        // Always laid out (invisible and inert while the Filter is off), so the text box
+        // doesn't shift when typing starts.
+        let on = self.filter.is_on();
+        let clear = button("✕")
+            .style(move |theme, status| match on {
+                true => button::text(theme, status),
+                false => button::Style {
+                    text_color: iced::Color::TRANSPARENT,
+                    ..button::Style::default()
+                },
+            })
+            .on_press_maybe(on.then_some(Message::ClearFilter));
+        let clear = match on {
+            true => crate::chrome::tip(clear, "Clear filter"),
+            false => clear.into(),
+        };
         let labels = match self.filter.labels.len() {
             0 => "Labels".to_string(),
             n => format!("Labels ({n})"),
@@ -131,15 +140,15 @@ impl App {
         row![crate::chrome::tip(
             text_input("Filter (Ctrl+F)", &self.filter.text)
                 .id(INPUT)
-                .width(220)
+                .width(width)
                 .on_input(Message::FilterChanged)
                 .on_submit(Message::SubmitFilter),
             "Filter (Ctrl+F)"
         )]
-        .extend(clear)
+        .push(clear)
         .push(
-            button(text(labels))
-                .style(button::secondary)
+            button(text(labels).wrapping(text::Wrapping::None))
+                .style(crate::app::quiet)
                 .on_press(Message::ToggleFilterMenu),
         )
         .spacing(4)
@@ -154,11 +163,12 @@ impl App {
                 true => text("No Labels on this Board").size(12).into(),
                 false => self.picker_rows(board, &self.filter.labels, Message::FilterLabel, None),
             };
-            container(rows)
+            let list = container(rows)
                 .width(300)
                 .padding(8)
-                .style(container::rounded_box)
-                .into()
+                .style(container::rounded_box);
+            // Under the Labels button, at the header's right end.
+            container(list).align_right(Fill).into()
         });
         let none = self.nothing_matches().then(|| {
             row![

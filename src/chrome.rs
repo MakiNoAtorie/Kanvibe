@@ -72,6 +72,11 @@ impl WindowState {
         self.pos = geometry.map(|g| Point::new(g.x, g.y));
     }
 
+    /// The window's size as last reported (or saved); `None` before any report.
+    pub fn size(&self) -> Option<Size> {
+        self.size
+    }
+
     pub fn resized(&mut self, size: Size) {
         self.minimised = size.width < 1.0 || size.height < 1.0;
         if !self.minimised {
@@ -180,11 +185,15 @@ impl App {
             .spacing(12)
             .into()
         });
+        // The same ✕ (Esc) header as the other dialogs; a fixed width holds the right-aligned ✕.
         dialog(
-            column![text("Keyboard shortcuts").size(20)]
-                .extend(rows)
-                .push(text("Esc closes this").size(12))
-                .spacing(8),
+            column![crate::app::dialog_header(
+                "Keyboard shortcuts",
+                Message::Escape
+            )]
+            .extend(rows)
+            .spacing(8)
+            .width(600),
         )
     }
 }
@@ -206,7 +215,8 @@ pub fn tip<'a>(
         content,
         iced::widget::container(text(label).size(12))
             .padding(4)
-            .style(iced::widget::container::rounded_box),
+            // Bordered, so a tooltip over a gray Column still reads as its own box.
+            .style(iced::widget::container::bordered_box),
         tooltip::Position::Top,
     )
     .into()

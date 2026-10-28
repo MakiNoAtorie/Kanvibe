@@ -357,6 +357,14 @@ fn archiving_shows_the_archived_section_and_restoring_opens_the_board() {
 }
 
 #[test]
+fn first_run_shows_the_app_name_above_create_your_first_board() {
+    let app = App::default();
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("Kanvibe").is_ok());
+    assert!(ui.find("Create your first Board").is_ok());
+}
+
+#[test]
 fn the_board_name_prompt_has_a_create_button() {
     let mut app = App::default();
     send(&mut app, [Message::NewBoard]);
