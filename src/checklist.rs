@@ -13,7 +13,7 @@ impl App {
             Some(p) => format!("Checklist {p}"),
             None => "Checklist".into(),
         };
-        column![text(heading).size(14)]
+        column![text(heading).size(13).font(crate::app::HEADING)]
             .extend(items)
             .push(
                 button("+ Add Checklist Item")

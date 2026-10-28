@@ -331,7 +331,7 @@ impl App {
         };
         let shown: Element<_> = chips.unwrap_or_else(|| text("+ Add Label").size(12).into());
         row![
-            text("Labels").size(12),
+            text("Labels").size(13).font(crate::app::HEADING),
             crate::chrome::tip(
                 button(shown)
                     .style(button::text)

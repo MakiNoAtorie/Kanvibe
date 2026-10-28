@@ -116,7 +116,12 @@ impl App {
             false => markdown::view(self.rendered.1.items(), &theme).map(Message::OpenLink),
         };
         column![
-            row![text("Description"), space::horizontal(), edit].align_y(Center),
+            row![
+                text("Description").size(13).font(crate::app::HEADING),
+                space::horizontal(),
+                edit
+            ]
+            .align_y(Center),
             body
         ]
         .spacing(6)

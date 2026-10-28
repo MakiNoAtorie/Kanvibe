@@ -63,7 +63,7 @@ impl App {
                 .spacing(8),
                 text(times).size(12),
             ]
-            .spacing(12),
+            .spacing(16),
         )
         .width(WIDTH)
         .height(Fill)
