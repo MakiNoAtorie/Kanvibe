@@ -114,13 +114,13 @@ impl App {
         self.filter.is_on() && !cards.any(|c| self.filter.matches(c, &board.labels))
     }
 
-    /// The Board header's filter controls: the text box with ×, and the Labels button.
+    /// The Board header's filter controls: the text box with ✕, and the Labels button.
     /// `width` is the text box's: 220 px, or `Fill` on its own line in a narrow Board.
     pub(crate) fn filter_bar(&self, width: iced::Length) -> Element<'_, Message> {
         // Always laid out (invisible and inert while the Filter is off), so the text box
         // doesn't shift when typing starts.
         let on = self.filter.is_on();
-        let clear = button("×")
+        let clear = button("✕")
             .style(move |theme, status| match on {
                 true => button::text(theme, status),
                 false => button::Style {
