@@ -1395,6 +1395,7 @@ impl App {
     fn view_close_dialog(&self) -> Element<'_, Message> {
         let idle = |message| self.writing.is_none().then_some(message);
         let buttons = row![
+            iced::widget::space::horizontal(),
             button("Retry").on_press_maybe(idle(Message::RetrySave)),
             button("Save a copy as…").on_press_maybe(idle(Message::SaveCopy)),
             button("Quit without saving").on_press_maybe(idle(Message::QuitWithoutSaving)),
@@ -1406,7 +1407,7 @@ impl App {
             buttons
         ]
         .spacing(12)
-        .max_width(560);
+        .width(560);
         dialog(panel)
     }
 
@@ -1727,6 +1728,7 @@ pub(crate) fn count_badge<'a>(label: String, over: bool) -> Element<'a, Message>
 /// A confirmation: the question, Cancel (as Esc) and the confirm button.
 fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
     let buttons = row![
+        iced::widget::space::horizontal(),
         button("Cancel").style(quiet).on_press(Message::Escape),
         button("Delete")
             .style(button::danger)
@@ -1736,7 +1738,7 @@ fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
     dialog(
         column![text(&confirm.prompt), buttons]
             .spacing(12)
-            .max_width(480),
+            .width(480),
     )
 }
 
