@@ -1558,15 +1558,10 @@ impl App {
                 "Add Card (N)",
             ),
         };
-        let count = text(self.count_label(col));
-        let count = if col.over_limit() {
-            count.style(text::danger)
-        } else {
-            count
-        };
+        let count = count_badge(self.count_label(col), col.over_limit());
         let count = match col.limit_tip() {
             Some(tip) => crate::chrome::tip(count, tip),
-            None => count.into(),
+            None => count,
         };
         // Dragged by the header only; the name label forwards the press (it captures its own).
         let item = Item::Column(col.id);
@@ -1692,6 +1687,26 @@ pub(crate) fn card_face<'a>(
     )
     .width(Fill)
     .padding(8)
+}
+
+/// A Column's count; over its limit, a danger-coloured pill that reads in both themes.
+/// Shared by the Board view and the image export.
+pub(crate) fn count_badge<'a>(label: String, over: bool) -> Element<'a, Message> {
+    if !over {
+        return text(label).into();
+    }
+    container(text(label))
+        .padding([0, 6])
+        .style(|theme: &Theme| {
+            let pair = theme.extended_palette().danger.base;
+            container::Style {
+                background: Some(pair.color.into()),
+                text_color: Some(pair.text),
+                border: iced::Border::default().rounded(8),
+                ..container::Style::default()
+            }
+        })
+        .into()
 }
 
 /// A confirmation: the question, Cancel (as Esc) and the confirm button.
