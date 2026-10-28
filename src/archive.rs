@@ -2,7 +2,7 @@
 use iced::widget::{button, column, container, row, scrollable, space, text};
 use iced::{Center, Element, Fill};
 
-use crate::app::{App, Confirm, Message, Selection, clipped_text};
+use crate::app::{App, Confirm, Message, Selection, clipped, clipped_text};
 use crate::domain::{Board, Column, Data, Id, cards};
 
 /// One line of the Archive view.
@@ -177,8 +177,17 @@ fn archived_row<'a>(row_: Row) -> Element<'a, Message> {
     container(
         row![
             clipped_text(row_.title).width(Fill),
-            clipped_text(row_.column).width(160),
-            button("Restore").on_press(Message::Restore(row_.card)),
+            // The Column is context, not content: muted.
+            clipped(
+                text(row_.column.clone())
+                    .style(text::secondary)
+                    .wrapping(text::Wrapping::None),
+                text(row_.column),
+            )
+            .width(160),
+            button("Restore")
+                .style(crate::app::quiet)
+                .on_press(Message::Restore(row_.card)),
             button("Delete")
                 .style(button::danger)
                 .on_press(Message::AskDelete(row_.card)),
