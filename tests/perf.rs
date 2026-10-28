@@ -173,7 +173,13 @@ impl Table {
             ms if ms < 1.0 => format!("{:.1} µs", ms * 1e3),
             ms => format!("{ms:.2} ms"),
         };
-        print!("\n{:<44}", "hot path (median, release)");
+        let build = if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        };
+        println!();
+        print!("{:<44}", format!("hot path (median, {build})"));
         SIZES
             .iter()
             .for_each(|(n, b, c)| print!("{:>22}", format!("{n} {b}B/{c}C")));
