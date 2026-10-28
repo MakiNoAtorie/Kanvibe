@@ -438,6 +438,8 @@ pub enum Message {
     SearchPick(Id),
     /// "Back to Board".
     CloseSearch,
+    /// Ctrl+D, or "Duplicate" in the open Card: copy the selected Card right below it.
+    DuplicateCard,
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -604,6 +606,20 @@ impl App {
             Message::ArchiveSelected => {
                 if let Some(card) = self.selection.and_then(|s| s.card) {
                     return self.apply(Message::ArchiveCard(card));
+                }
+            }
+            Message::DuplicateCard => {
+                self.commit_pending();
+                let selection = self.selection.and_then(|s| Some((s.column, s.card?)));
+                if let Some((column, card)) = selection
+                    && let Some(copy) = self.data.duplicate_card(card)
+                {
+                    self.selection = Some(Selection {
+                        column,
+                        card: Some(copy),
+                    });
+                    self.record_step(self.current_board);
+                    return self.reveal_selection();
                 }
             }
             Message::ArchiveCard(card) => {
@@ -1883,6 +1899,12 @@ impl App {
                     .style(quiet)
                     .on_press(Message::OpenMove),
                 "Move to Board (M)"
+            ),
+            crate::chrome::tip(
+                button("Duplicate")
+                    .style(quiet)
+                    .on_press(Message::DuplicateCard),
+                "Duplicate (Ctrl+D)"
             ),
             crate::chrome::tip(
                 button("Archive")

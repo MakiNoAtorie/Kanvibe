@@ -11,6 +11,7 @@ fn press(key: Key, modifiers: Modifiers) -> keyboard::Event {
             "z" => Physical::Code(Code::KeyZ),
             "y" => Physical::Code(Code::KeyY),
             "f" => Physical::Code(Code::KeyF),
+            "d" => Physical::Code(Code::KeyD),
             _ => unreachable!(),
         },
         _ => Physical::Code(Code::F24),
@@ -365,4 +366,16 @@ fn up_and_down_in_the_search_box_move_the_highlight() {
         Some(Message::SearchMove(Direction::Down))
     );
     assert_eq!(keys::map(&named(Named::ArrowLeft), &search), None);
+}
+
+#[test]
+fn ctrl_d_duplicates_unless_typing() {
+    assert_eq!(
+        keys::map(&letter("d", Modifiers::CTRL), &NOTHING_FOCUSED),
+        Some(Message::DuplicateCard)
+    );
+    assert_eq!(
+        keys::map(&letter("d", Modifiers::CTRL), &CAPTURE_FOCUSED),
+        None
+    );
 }

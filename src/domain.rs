@@ -327,6 +327,27 @@ impl Data {
         Some(id)
     }
 
+    /// Copies a Card right after itself: new IDs for it and its Items, Items unticked, created
+    /// and updated now; every other field is kept. Returns the copy's ID; unknown Card: nothing.
+    pub fn duplicate_card(&mut self, card: Id) -> Option<Id> {
+        let (b, c) = self.holding(card)?;
+        let at = self.boards[b].columns[c]
+            .cards
+            .iter()
+            .position(|x| x.id == card)?;
+        let mut copy = self.boards[b].columns[c].cards[at].clone();
+        copy.id = self.new_id();
+        for item in &mut copy.checklist {
+            item.id = self.new_id();
+            item.done = false;
+        }
+        copy.created = now();
+        copy.updated = copy.created.clone();
+        let id = copy.id;
+        self.boards[b].columns[c].cards.insert(at + 1, copy);
+        Some(id)
+    }
+
     /// Moves a Card to `index` in a Column (clamped to its end). Unknown Card or Column: nothing.
     pub fn move_card(&mut self, card: Id, column: Id, index: usize) {
         let (Some((fb, fc)), Some((tb, tc))) =

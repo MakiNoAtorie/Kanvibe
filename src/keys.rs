@@ -59,6 +59,7 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         (true, Some('y')) => return Some(Message::Redo),
         (true, Some('f')) if modifiers.shift() => return Some(Message::OpenSearch),
         (true, Some('f')) => return Some(Message::FocusFilter),
+        (true, Some('d')) if !typing => return Some(Message::DuplicateCard),
         (false, Some('n')) if !typing && !modifiers.alt() => return Some(Message::NewCard),
         (false, Some('e')) if !typing && !modifiers.alt() => return Some(Message::EditDescription),
         (false, Some('m')) if !typing && !modifiers.alt() => return Some(Message::OpenMove),

@@ -39,6 +39,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Del", "Archive the selected Card"),
     ("L", "Labels of the open or selected Card"),
     ("M", "Move the open or selected Card to another Board"),
+    ("Ctrl+D", "Duplicate the selected Card"),
     (
         "Ctrl+Up / Ctrl+Down",
         "Move the Checklist Item being edited",
