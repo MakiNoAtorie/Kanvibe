@@ -374,14 +374,14 @@ fn permanent_delete_asks_first_and_esc_cancels() {
 }
 
 #[test]
-fn the_confirmation_names_the_card() {
+fn the_confirmation_names_the_card_and_says_it_can_be_undone() {
     let mut app = app_with_cards();
     let a = card(&app, "A");
     send(&mut app, [Message::ArchiveCard(a), Message::AskDelete(a)]);
     let board = &app.data.boards[0];
     assert_eq!(
         archive::delete_question(board, a).as_deref(),
-        Some("Permanently delete \"A\"?")
+        Some("Permanently delete \"A\"? You can undo this until Kanvibe closes.")
     );
 }
 

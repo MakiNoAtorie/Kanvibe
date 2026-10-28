@@ -34,7 +34,10 @@ pub fn remove_column_text(column: &Column) -> String {
 /// The question for permanently deleting an archived Card.
 pub fn delete_question(board: &Board, card: Id) -> Option<String> {
     let archived = board.archived_cards.iter().find(|a| a.card.id == card)?;
-    Some(format!("Permanently delete \"{}\"?", archived.card.title))
+    Some(format!(
+        "Permanently delete \"{}\"? You can undo this until Kanvibe closes.",
+        archived.card.title
+    ))
 }
 
 impl App {
