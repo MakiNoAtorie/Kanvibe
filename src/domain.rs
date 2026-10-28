@@ -102,6 +102,9 @@ pub struct Card {
     /// Markdown (ADR 0003); empty when the Card has none.
     #[serde(default)]
     pub description: String,
+    /// ISO calendar date `YYYY-MM-DD` (see `due::parse`); `None` when the Card has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due: Option<String>,
 }
 
 /// A Checklist Item. Edits target it by `id`, never by position.
@@ -323,6 +326,7 @@ impl Data {
             checklist: Vec::new(),
             labels: Vec::new(),
             description: String::new(),
+            due: None,
         });
         Some(id)
     }

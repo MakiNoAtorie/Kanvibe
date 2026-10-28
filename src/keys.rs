@@ -33,6 +33,8 @@ pub enum Input {
     Filter,
     /// The Search view's box.
     Search,
+    /// The open Card's Due field.
+    Due,
 }
 
 /// Maps a key press to the Message it stands for. iced only delivers keys the focused widget

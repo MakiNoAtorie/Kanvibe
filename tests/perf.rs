@@ -84,6 +84,7 @@ fn data(boards: usize, cards: usize) -> Data {
                         ),
                         _ => String::new(),
                     },
+                    due: None,
                 };
                 columns[i % 3].cards.push(card);
             }
