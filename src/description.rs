@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::widget::text_editor::{Action, Binding, Edit, KeyPress, Motion, Status};
-use iced::widget::{button, column, markdown, row, space, text, text_editor};
+use iced::widget::{button, column, container, markdown, row, space, text, text_editor};
 use iced::{Center, Element, Font};
 
 use crate::app::{App, Field, Message};
@@ -68,9 +68,19 @@ pub fn key_binding(key: KeyPress) -> Option<Binding<Message>> {
     Binding::from_key_press(key)
 }
 
-/// The Card face's description icon, when the Card has a description.
-pub(crate) fn face_icon<'a>(card: &Card) -> Option<Element<'a, Message>> {
-    (!card.description.is_empty()).then(|| text("≡").style(text::secondary).into())
+/// The Card face's description preview: its first non-blank line, muted and small, clipped
+/// to one line.
+pub(crate) fn face_preview(card: &Card) -> Option<Element<'_, Message>> {
+    let line = card
+        .description
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?;
+    let line = text(line)
+        .size(crate::app::META_SIZE)
+        .style(text::secondary)
+        .wrapping(text::Wrapping::None);
+    Some(container(line).width(iced::Fill).clip(true).into())
 }
 
 /// iced's Markdown style with inline code on the weak background in the theme's text colour,

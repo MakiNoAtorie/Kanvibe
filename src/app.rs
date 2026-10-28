@@ -5,7 +5,7 @@ use iced::widget::{
     button, center, column, container, operation, row, scrollable, text, text_input, tooltip,
 };
 use iced::widget::{opaque, stack};
-use iced::{Border, Center, Element, Event, Fill, Padding, Shrink, Subscription, Task};
+use iced::{Border, Center, Element, Event, Fill, Padding, Subscription, Task};
 use iced::{Theme, time, window};
 use iced::{event, keyboard};
 
@@ -1428,6 +1428,11 @@ impl App {
             Field::BoardName(_) | Field::ColumnName(_) => HEADING,
             _ => iced::Font::DEFAULT,
         };
+        // Column names are muted so the Cards lead.
+        let tone = match field {
+            Field::ColumnName(_) => text::secondary,
+            _ => text::default,
+        };
         match &self.editing {
             Some(edit) if edit.field == field && !matches!(field, Field::CardTitle(_)) => {
                 text_input("Name", &edit.text)
@@ -1444,8 +1449,14 @@ impl App {
                     Field::CardTitle(_) => text::Wrapping::Word,
                     _ => text::Wrapping::None,
                 };
-                let label = mouse_area(text(name).size(size).font(font).wrapping(wrapping))
-                    .on_double_click(Message::StartEdit(field));
+                let label = mouse_area(
+                    text(name)
+                        .size(size)
+                        .font(font)
+                        .wrapping(wrapping)
+                        .style(tone),
+                )
+                .on_double_click(Message::StartEdit(field));
                 let label = match drag {
                     Some(item) => label
                         .on_press(Message::DragPress(item))
@@ -1453,8 +1464,8 @@ impl App {
                     None => label,
                 };
                 // The open Card's title names its shortcut too.
-                let hint =
-                    matches!(field, Field::CardTitle(_)).then(|| text("Rename (F2)").size(12));
+                let hint = matches!(field, Field::CardTitle(_))
+                    .then(|| text("Rename (F2)").size(META_SIZE));
                 let full = column![text(name)].extend(hint.map(Into::into));
                 clipped(label, full).width(Fill).into()
             }
@@ -1564,20 +1575,21 @@ impl App {
         columns.extend([
             gap(board.columns.len()),
             // A ghost of a Column: its width, a hairline edge, muted text.
-            button(text("+ Add Column").size(13))
+            button(text("+ Add Column").size(COLUMN_NAME_SIZE))
                 .width(COLUMN_WIDTH)
+                .height(Fill)
                 .padding([10, 12])
                 .style(|theme: &Theme, status| button::Style {
                     border: Border::default()
                         .color(theme.extended_palette().background.weak.color)
                         .width(1)
-                        .rounded(8),
-                    ..faded(0.6)(theme, status)
+                        .rounded(COLUMN_RADIUS),
+                    ..faded(0.7)(theme, status)
                 })
                 .on_press(Message::AddColumn(board.id))
                 .into(),
         ]);
-        let name = self.editable_name(Field::BoardName(board.id), &board.name, 20);
+        let name = self.editable_name(Field::BoardName(board.id), &board.name, BOARD_TITLE_SIZE);
         let archive = button(
             text(format!("Archive ({})", board.archived_cards.len()))
                 .wrapping(text::Wrapping::None),
@@ -1687,10 +1699,11 @@ impl App {
             let title: Element<_> = match self.editing.as_ref().map(|e| (e.field, &e.text)) {
                 Some((Field::CardTitle(id), edit)) if id == card.id => text_input("Title", edit)
                     .id(EDIT_INPUT)
+                    .size(CARD_TITLE_SIZE)
                     .on_input(Message::EditChanged)
                     .on_submit(Message::CommitEdit)
                     .into(),
-                _ => text(&card.title).width(Fill).into(),
+                _ => text(&card.title).size(CARD_TITLE_SIZE).width(Fill).into(),
             };
             let card_box = match self.open_card() == Some(card.id) {
                 true => self.view_open_card(card, title),
@@ -1754,7 +1767,7 @@ impl App {
             .into(),
             _ => crate::chrome::tip(
                 button("+ Add Card")
-                    .style(faded(0.6))
+                    .style(faded(0.7))
                     .on_press(Message::OpenCapture(col.id)),
                 "Add Card (N)",
             ),
@@ -1767,7 +1780,12 @@ impl App {
         // Dragged by the header only; the name label forwards the press (it captures its own).
         let item = Item::Column(col.id);
         let header = row![
-            self.name_widget(Field::ColumnName(col.id), &col.name, 14, Some(item)),
+            self.name_widget(
+                Field::ColumnName(col.id),
+                &col.name,
+                COLUMN_NAME_SIZE,
+                Some(item)
+            ),
             count,
             crate::chrome::tip(
                 button("⋯")
@@ -1778,6 +1796,10 @@ impl App {
         ]
         .spacing(8)
         .align_y(Center);
+        // A selected Column tints its header instead of outlining the whole Column.
+        let header = container(header)
+            .padding([2, 4])
+            .style(header_tint(selection.is_some()));
         let header = drag::source(header, item);
         let menu: Option<Element<_>> = match &self.limit_input {
             Some(input) if input.column == col.id => Some(
@@ -1789,7 +1811,7 @@ impl App {
                 ]
                 .extend(input.refused.then(|| {
                     text("Enter a whole number of 1 or more, or leave blank to remove")
-                        .size(12)
+                        .size(META_SIZE)
                         .style(text::danger)
                         .into()
                 }))
@@ -1821,8 +1843,8 @@ impl App {
             ),
             _ => None,
         };
-        // The Column shrinks to its Cards, so "+ Add Card" scrolls with them: a footer below
-        // the list would be squeezed out once the list fills the height (layout is in order).
+        // "+ Add Card" scrolls with the Cards, right after the last one, not pinned to the
+        // bottom of the full-height Column.
         let footer = container(footer).padding(Padding::ZERO.top(4));
         let column_box = container(
             column![header]
@@ -1837,9 +1859,9 @@ impl App {
         )
         .id(column_widget(col.id))
         .width(COLUMN_WIDTH)
-        .height(Shrink) // not the Fill it would take from the Cards' scrollable
+        .height(Fill)
         .padding(8)
-        .style(outlined(column_style, selection.is_some()));
+        .style(column_style);
         // Cards and buttons capture their clicks, so this only fires on the Column's empty area.
         let area = mouse_area(column_box).on_press(Message::Select(Selection {
             column: col.id,
@@ -1916,8 +1938,8 @@ impl App {
         .spacing(8);
         // One time per line: both on one line overflow a 280px Column.
         let times = column![
-            text(format!("Created {}", local_time(&card.created, &tz))).size(12),
-            text(format!("Updated {}", local_time(&card.updated, &tz))).size(12),
+            text(format!("Created {}", local_time(&card.created, &tz))).size(META_SIZE),
+            text(format!("Updated {}", local_time(&card.updated, &tz))).size(META_SIZE),
         ];
         container(
             column![
@@ -1945,40 +1967,49 @@ pub fn local_time(timestamp: &str, tz: &jiff::tz::TimeZone) -> String {
     }
 }
 
-/// A Card's face, unstyled: title row (+ description icon), Label chips, Checklist progress.
+/// A Card's face, unstyled: title, the description's first line, then one metadata row
+/// (Label chips, Checklist progress).
 /// Shared by the Board view and the image export.
 pub(crate) fn card_face<'a>(
     board: Option<&'a Board>,
     card: &'a Card,
     title: Element<'a, Message>,
 ) -> container::Container<'a, Message> {
-    let chips = board.and_then(|b| labels::chips(b, card));
+    let mut meta: Vec<Element<_>> = Vec::new();
+    meta.extend(board.and_then(|b| labels::chips(b, card)));
+    meta.extend(
+        card.progress()
+            // ✓, not ☑: that renders as a colour emoji competing with the chips.
+            .map(|p| text(format!("✓ {p}")).size(META_SIZE).into()),
+    );
+    let meta = (!meta.is_empty()).then(|| metadata_row(meta).into());
     container(
-        column![row![title].extend(description::face_icon(card)).spacing(6)]
-            .spacing(4)
-            .extend(chips)
-            .extend(
-                card.progress()
-                    // ✓, not ☑: that renders as a colour emoji competing with the chips.
-                    .map(|p| text(format!("✓ {p}")).size(12).into()),
-            ),
+        column![title]
+            .extend(description::face_preview(card))
+            .extend(meta)
+            .spacing(4),
     )
     .width(Fill)
     .padding([9, 11])
 }
 
+/// The face's metadata (chips, badges, progress) as one row: one size, one spacing.
+pub(crate) fn metadata_row<'a>(items: Vec<Element<'a, Message>>) -> widget::Row<'a, Message> {
+    row(items).spacing(6).align_y(Center)
+}
+
 /// A Column's count as a small grey pill; over its limit, a danger-coloured one.
 /// Shared by the Board view and the image export.
 pub(crate) fn count_badge<'a>(label: String, over: bool) -> Element<'a, Message> {
-    container(text(label).size(12))
+    container(text(label).size(META_SIZE))
         .padding([1, 7])
         .style(move |theme: &Theme| {
             let palette = theme.extended_palette();
             let (background, text) = match over {
                 true => (palette.danger.base.color, palette.danger.base.text),
                 false => (
-                    palette.background.weaker.color,
-                    palette.background.weaker.text.scale_alpha(0.75),
+                    palette.background.weak.color,
+                    palette.background.weak.text.scale_alpha(0.75),
                 ),
             };
             container::Style {
@@ -2167,31 +2198,34 @@ pub(crate) fn faded(alpha: f32) -> impl Fn(&Theme, button::Status) -> button::St
     }
 }
 
-/// A Column: the raised surface, rounded, on a soft shadow (the image export's too).
+/// A Column: a tray (the weaker tier, a shade off the page), rounded, flat (the image
+/// export's too).
 pub(crate) fn column_style(theme: &Theme) -> container::Style {
     let palette = theme.extended_palette();
     container::Style {
-        background: Some(palette.background.weakest.color.into()),
-        text_color: Some(palette.background.weakest.text),
-        border: Border::default().rounded(12),
-        shadow: iced::Shadow {
-            color: iced::Color::BLACK.scale_alpha(0.08),
-            offset: iced::Vector::new(0.0, 2.0),
-            blur_radius: 10.0,
-        },
+        background: Some(palette.background.weaker.color.into()),
+        text_color: Some(palette.background.weaker.text),
+        border: Border::default().rounded(COLUMN_RADIUS),
         ..container::Style::default()
     }
 }
 
-/// A Card: a ticket tinted from the raised surface toward the text, with a hairline edge
-/// (the image export's too).
+/// A Card: a ticket on the lightest tier with a hairline edge and a one-pixel shadow (the
+/// image export's too).
 pub(crate) fn card_style(theme: &Theme) -> container::Style {
     let bg = theme.extended_palette().background;
-    let fill = iced::theme::palette::mix(bg.weakest.color, bg.weaker.color, 0.45);
     container::Style {
-        background: Some(fill.into()),
+        background: Some(bg.weakest.color.into()),
         text_color: Some(bg.weakest.text),
-        border: Border::default().color(bg.weaker.color).width(1).rounded(6),
+        border: Border::default()
+            .color(bg.weak.color)
+            .width(1)
+            .rounded(CARD_RADIUS),
+        shadow: iced::Shadow {
+            color: iced::Color::BLACK.scale_alpha(0.06),
+            offset: iced::Vector::new(0.0, 1.0),
+            blur_radius: 2.0,
+        },
         ..container::Style::default()
     }
 }
@@ -2213,9 +2247,30 @@ pub(crate) fn outlined(
     }
 }
 
+/// A Column header's selection: a low-alpha primary tint behind it.
+pub(crate) fn header_tint(selected: bool) -> impl Fn(&Theme) -> container::Style {
+    move |theme| container::Style {
+        background: selected.then(|| theme.palette().primary.scale_alpha(0.12).into()),
+        border: Border::default().rounded(CARD_RADIUS),
+        ..container::Style::default()
+    }
+}
+
 const BOARD_SCROLL: &str = "board";
 /// A Column's width (the "+ Add Column" ghost's too).
 pub(crate) const COLUMN_WIDTH: f32 = 280.0;
+/// Text sizes: the Board title, Column names, Card titles, and face metadata (count badge,
+/// Label chips, Checklist progress, small print).
+pub(crate) const BOARD_TITLE_SIZE: u32 = 18;
+pub(crate) const COLUMN_NAME_SIZE: u32 = 13;
+pub(crate) const CARD_TITLE_SIZE: u32 = 14;
+pub(crate) const META_SIZE: u32 = 12;
+/// Corner radii: Columns (and the "+ Add Column" ghost), Cards (and the header tint).
+pub(crate) const COLUMN_RADIUS: f32 = 10.0;
+pub(crate) const CARD_RADIUS: f32 = 6.0;
+/// Gaps between Columns and between Cards.
+pub(crate) const COLUMN_GAP: f32 = 12.0;
+pub(crate) const CARD_GAP: f32 = 6.0;
 /// Board and Column names (the image export's too).
 pub(crate) const HEADING: iced::Font = iced::Font {
     weight: iced::font::Weight::Semibold,

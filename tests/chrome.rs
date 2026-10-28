@@ -2,7 +2,7 @@
 use std::fs;
 
 use iced::keyboard::{self, Key, Modifiers, key::Named};
-use iced::{Point, Size, Theme, window};
+use iced::{Point, Size, window};
 use kanvibe::app::{App, Message};
 use kanvibe::chrome;
 use kanvibe::keys::{self, Context};
@@ -69,7 +69,7 @@ fn theme_is_light_until_toggled_and_toggles_back() {
     let light = app.theme();
     assert!(!light.extended_palette().is_dark);
     send(&mut app, [Message::ToggleTheme]);
-    assert_eq!(app.theme(), Theme::Dark);
+    assert!(app.theme().extended_palette().is_dark);
     send(&mut app, [Message::ToggleTheme]);
     assert_eq!(app.theme(), light);
 }
@@ -90,7 +90,7 @@ fn theme_is_remembered_between_launches() {
     let mut app = app_in(tmp.path());
     send(&mut app, [Message::ToggleTheme]);
     assert!(saved_settings(tmp.path()).dark);
-    assert_eq!(opened(tmp.path()).theme(), Theme::Dark);
+    assert!(opened(tmp.path()).theme().extended_palette().is_dark);
 }
 
 // --- Window geometry ---
