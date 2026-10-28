@@ -145,13 +145,22 @@ pub enum Closing {
 pub struct SaveJob {
     dir: PathBuf,
     state: Arc<(Data, Settings)>,
+    /// `App.rotation` when the job was made; `run` rotates and hands the new value back.
+    rotation: storage::Rotation,
+    /// The save changes Board data (see `storage::rotate`).
+    data_changed: bool,
 }
 
 impl SaveJob {
-    /// Writes the data file, blocking. The one place the app performs a save.
-    pub fn run(self) -> Message {
+    /// Rotates the backups if due, then writes the data file, blocking. The one place the app
+    /// performs a save; off the UI thread, since rotating reads, copies and parses the file.
+    pub fn run(mut self) -> Message {
+        if let Err(e) = storage::rotate(&self.dir, &mut self.rotation, self.data_changed) {
+            eprintln!("Backups not rotated: {e}");
+        }
         let saved = storage::save(&self.dir, &self.state.0, &self.state.1);
-        Message::Saved(saved.map_err(|e| not_saved(&storage::file_path(&self.dir), e)))
+        let saved = saved.map_err(|e| not_saved(&storage::file_path(&self.dir), e));
+        Message::Saved(saved, self.rotation)
     }
 }
 
@@ -245,8 +254,9 @@ pub enum Message {
     OpenLimit(Id),
     LimitChanged(String),
     SubmitLimit,
-    /// The background writer finished; `Err` holds the "Not saved" bar text.
-    Saved(Result<(), String>),
+    /// The background writer finished; `Err` holds the "Not saved" bar text. Also the backup
+    /// rotation state after the job's rotation.
+    Saved(Result<(), String>, storage::Rotation),
     /// The 10 s timer while not saved, or Retry in the close dialog: try the failed save again.
     RetrySave,
     /// "Save a copy as…" in the close dialog: the native Save dialog, then the copy is written.
@@ -753,7 +763,8 @@ impl App {
                 self.closing = Closing::Waiting;
                 return self.exit_if_saved();
             }
-            Message::Saved(result) => {
+            Message::Saved(result, rotation) => {
+                self.rotation = rotation;
                 // The job has dropped its share by now, so this moves rather than copies.
                 let attempted = (self.writing.take())
                     .map(|s| Arc::try_unwrap(s).unwrap_or_else(|s| (*s).clone()));
@@ -2077,16 +2088,16 @@ impl App {
         if (self.failed.as_ref()).is_some_and(|(d, s)| self.same((d, s), now)) {
             return None; // wait for a change or the retry timer
         }
-        let dir = dir.clone();
-        // ponytail: rotation runs here on the UI thread (a file copy, at most once per session or
-        // per 24 h, never while a write is in flight); move it into `SaveJob::run` if it ever stalls.
-        let changed = self.saved.0 != self.data;
-        if let Err(e) = storage::rotate(&dir, &mut self.rotation, changed) {
-            eprintln!("Backups not rotated: {e}");
-        }
+        // Only a due rotation looks at whether Board data changed.
+        let data_changed = self.rotation == storage::Rotation::Due && self.saved.0 != self.data;
         let state = Arc::new((self.data.clone(), settings));
         self.writing = Some(Arc::clone(&state));
-        Some(SaveJob { dir, state })
+        Some(SaveJob {
+            dir: dir.clone(),
+            state,
+            rotation: self.rotation,
+            data_changed,
+        })
     }
 
     /// Exits once a requested close has nothing left to save and no save in flight;

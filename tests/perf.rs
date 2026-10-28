@@ -229,6 +229,26 @@ fn measure(table: &mut Table, boards: usize, cards: usize) {
             timed(|| storage::rotate(rotate_dir.path(), &mut Rotation::Due, true).unwrap())
         }),
     );
+    // The same in the app: the session's first saving message, timed on the UI thread.
+    table.add(
+        "first SubmitCapture of a session (rotation due)",
+        mean(5, || {
+            let session = tempfile::tempdir().unwrap();
+            copy_dir(&dir, session.path());
+            std::fs::copy(
+                older.path().join("kanvibe.json"),
+                session.path().join("kanvibe.json.bak1"),
+            )
+            .unwrap();
+            let mut app = App::open(session.path().to_path_buf()).unwrap();
+            let column = app.data.boards[0].columns[0].id;
+            let _ = send(&mut app, Message::OpenCapture(column));
+            let _ = send(&mut app, Message::CaptureChanged("New card".into()));
+            let t = send(&mut app, Message::SubmitCapture);
+            assert!(session.path().join("kanvibe.json.bak2").exists(), "rotated");
+            t
+        }),
+    );
     table.add(
         "storage::rotate (.bak1 fresh, Done)",
         mean(100, || {

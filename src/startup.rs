@@ -65,10 +65,12 @@ impl Screen {
                 std::thread::spawn(move || {
                     let _ = done.send(job.run()); // receiver gone only if the app quit
                 });
-                let saved = Task::perform(result, |result| {
-                    Message::App(result.unwrap_or(app::Message::Saved(Err(
-                        "Not saved: the writer stopped".into(),
-                    ))))
+                let rotation = app.rotation; // unknown if the writer stopped: keep it
+                let saved = Task::perform(result, move |result| {
+                    Message::App(result.unwrap_or(app::Message::Saved(
+                        Err("Not saved: the writer stopped".into()),
+                        rotation,
+                    )))
                 });
                 return Task::batch([task, saved]);
             }
