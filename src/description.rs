@@ -73,6 +73,18 @@ pub(crate) fn face_icon<'a>(card: &Card) -> Option<Element<'a, Message>> {
     (!card.description.is_empty()).then(|| text("≡").style(text::secondary).into())
 }
 
+/// The description under a Card face's title box: its first lines, or where Tab goes.
+pub(crate) fn face_preview<'a>(card: &Card) -> Element<'a, Message> {
+    let preview = match card.description.is_empty() {
+        true => "Description (Tab)".to_owned(),
+        false => card.description.lines().take(3).collect::<Vec<_>>().join(
+            "
+",
+        ),
+    };
+    text(preview).size(13).style(text::secondary).into()
+}
+
 /// iced's Markdown style with inline code on the weak background in the theme's text colour,
 /// instead of a black box (loud in the light theme).
 fn markdown_settings(theme: &iced::Theme) -> markdown::Settings {
@@ -110,34 +122,38 @@ impl App {
             ]
             .align_y(Center)
         };
-        if self
-            .editing
-            .as_ref()
-            .is_some_and(|e| e.field == Field::Description(card.id))
-        {
-            let editor = text_editor(&self.editor)
-                .id(EDITOR)
-                .placeholder("Markdown: **bold**, *italic*, [link](https://…)")
-                .on_action(Message::DescriptionAction)
-                .key_binding(key_binding)
-                .font(Font::MONOSPACE)
-                .min_height(160)
-                .highlight("md", self.highlighter_theme());
-            let done: Element<_> = button("Done").on_press(Message::CommitEdit).into();
-            return column![header(done), editor].spacing(6).into();
-        }
-        let edit = crate::chrome::tip(
-            button("Edit")
-                .style(crate::app::quiet)
-                .on_press(Message::EditDescription),
-            "Edit description (E)",
-        );
+        // The editor is on the Card face; the panel shows the result as it is typed.
+        let editing =
+            (self.editing.as_ref()).is_some_and(|e| e.field == Field::Description(card.id));
+        let edit = match editing {
+            true => button("Done").on_press(Message::CommitEdit).into(),
+            false => crate::chrome::tip(
+                button("Edit")
+                    .style(crate::app::quiet)
+                    .on_press(Message::EditDescription),
+                "Edit description (E)",
+            ),
+        };
         let body: Element<_> = match card.description.is_empty() {
             true => text("No description").style(text::secondary).into(),
             false => markdown::view(self.rendered.1.items(), markdown_settings(&theme))
                 .map(Message::OpenLink),
         };
         column![header(edit), body].spacing(6).into()
+    }
+
+    /// The highlighted Markdown editor of the description being edited.
+    pub(crate) fn description_editor(&self, min_height: u32) -> Element<'_, Message> {
+        text_editor(&self.editor)
+            .id(EDITOR)
+            .placeholder("Markdown: **bold**, *italic*, [link](https://…)")
+            .on_action(Message::DescriptionAction)
+            .key_binding(key_binding)
+            .font(Font::MONOSPACE)
+            .size(13)
+            .min_height(min_height)
+            .highlight("md", self.highlighter_theme())
+            .into()
     }
 
     /// Wraps the selection in `markup`, or inserts the markers with the cursor between them.

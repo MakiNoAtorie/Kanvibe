@@ -23,6 +23,8 @@ pub enum Input {
     CaptureDescription,
     /// The pending edit of a Card title.
     CardTitle,
+    /// The description editor.
+    CardDescription,
     /// The box of the pending edit (`app::Field`): a rename, later titles and the like.
     Edit,
     /// The box of a pending Checklist Item edit.
@@ -63,12 +65,13 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
     if ctrl && *key == Key::Named(Named::Tab) {
         return Some(Message::CycleBoard(!modifiers.shift()));
     }
-    // Tab steps from a Card's title to its description; Shift+Tab back in the Capture box.
+    // Tab steps from a Card's title to its description; Shift+Tab back.
     if *key == Key::Named(Named::Tab) && !ctrl {
         match (context.focused, modifiers.shift()) {
             (Some(Input::Capture), false) => return Some(Message::FocusCapture(true)),
             (Some(Input::CaptureDescription), true) => return Some(Message::FocusCapture(false)),
             (Some(Input::CardTitle), false) => return Some(Message::EditDescription),
+            (Some(Input::CardDescription), true) => return Some(Message::EditTitle),
             _ => {}
         }
     }

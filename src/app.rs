@@ -726,7 +726,7 @@ impl App {
                         (CAPTURE_INPUT, Input::Capture),
                         (CAPTURE_DESCRIPTION, Input::CaptureDescription),
                         (EDIT_INPUT, item_or_edit),
-                        (description::EDITOR, Input::Edit),
+                        (description::EDITOR, Input::CardDescription),
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
                         (labels::NEW_INPUT, Input::Edit),
                         (filter::INPUT, Input::Filter),
@@ -771,8 +771,9 @@ impl App {
                         start,
                         typed_at: None,
                     });
-                    // A title is edited on its Card face: select it, so it shows and is in view.
-                    if let Field::CardTitle(card) = field
+                    // A Card's title and description are edited on its Card face: select it, so
+                    // it shows and is in view.
+                    if let Field::CardTitle(card) | Field::Description(card) = field
                         && let Some(column) = self.data.column_of_card(card)
                     {
                         let card = Some(card);
@@ -1626,12 +1627,20 @@ impl App {
                 .drag
                 .as_ref()
                 .is_some_and(|d| d.started && d.item == Item::Card(card.id));
-            let title: Element<_> = match &self.editing {
-                Some(edit) if edit.field == Field::CardTitle(card.id) => {
-                    text_input("Title", &edit.text)
+            // While its title or description is edited, the Card face shows both.
+            let title: Element<_> = match self.editing.as_ref().map(|e| (e.field, &e.text)) {
+                Some((Field::CardTitle(id), edit)) if id == card.id => column![
+                    text_input("Title", edit)
                         .id(EDIT_INPUT)
                         .on_input(Message::EditChanged)
-                        .on_submit(Message::CommitEdit)
+                        .on_submit(Message::CommitEdit),
+                    description::face_preview(card),
+                ]
+                .spacing(4)
+                .into(),
+                Some((Field::Description(id), _)) if id == card.id => {
+                    column![text(&card.title).width(Fill), self.description_editor(80)]
+                        .spacing(4)
                         .into()
                 }
                 _ => text(&card.title).width(Fill).into(),

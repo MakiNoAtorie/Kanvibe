@@ -146,6 +146,12 @@ fn double_clicking_a_card_edits_its_title_and_tab_moves_to_the_description() {
         Some(Field::CardTitle(b)),
         "the second release does not commit the edit"
     );
+    let mut ui = iced_test::simulator(app.view());
+    assert!(
+        ui.find("Description (Tab)").is_ok(),
+        "the Card face shows where Tab goes"
+    );
+    drop(ui);
 
     let title = Context {
         focused: Some(keys::Input::CardTitle),
@@ -164,6 +170,30 @@ fn double_clicking_a_card_edits_its_title_and_tab_moves_to_the_description() {
     assert_eq!(
         app.editing.as_ref().map(|e| e.field),
         Some(Field::Description(b))
+    );
+
+    let description = Context {
+        focused: Some(keys::Input::CardDescription),
+        dragging: false,
+    };
+    let shift_tab = keyboard::Event::KeyPressed {
+        modified_key: Key::Named(Named::Tab),
+        key: Key::Named(Named::Tab),
+        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Tab),
+        location: keyboard::Location::Standard,
+        modifiers: Modifiers::SHIFT,
+        text: None,
+        repeat: false,
+    };
+    assert_eq!(
+        keys::map(&shift_tab, &description),
+        Some(Message::EditTitle)
+    );
+    send(&mut app, [Message::EditTitle]);
+    assert_eq!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(Field::CardTitle(b)),
+        "Shift+Tab goes back to the title"
     );
 
     // A title is edited on its Card face, so editing one selects that Card.
