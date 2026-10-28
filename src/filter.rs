@@ -3,7 +3,7 @@
 //! [`placement`] are plain domain code; `App::shown` adds the selected and just-created Cards.
 //! The Filter is never saved and is cleared on a Board switch.
 use iced::widget::{button, container, operation, row, text, text_input};
-use iced::{Center, Element, Task};
+use iced::{Center, Element, Fill, Task};
 
 use crate::app::{App, Message, Selection};
 use crate::domain::{Board, Card, Column, Id, Label};
@@ -155,11 +155,12 @@ impl App {
                 true => text("No Labels on this Board").size(12).into(),
                 false => self.picker_rows(board, &self.filter.labels, Message::FilterLabel, None),
             };
-            container(rows)
+            let list = container(rows)
                 .width(300)
                 .padding(8)
-                .style(container::rounded_box)
-                .into()
+                .style(container::rounded_box);
+            // Under the Labels button, at the header's right end.
+            container(list).align_right(Fill).into()
         });
         let none = self.nothing_matches().then(|| {
             row![

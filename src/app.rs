@@ -1476,8 +1476,9 @@ impl App {
                     .on_press(Message::ArchiveBoard(board.id)),
             ]
             .spacing(8)
-            .into()
         });
+        // Under the ⋯ that opened it.
+        let menu = menu.map(|m| container(m).align_right(Fill).into());
         column![header]
             .extend(menu)
             .extend(self.filter_lines(board))
