@@ -1,8 +1,8 @@
 //! The left sidebar: active Boards, the collapsed "Archived (n)" section and the footer.
 use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
-use iced::{Border, Center, Color, Element, Fill, Theme};
+use iced::{Border, Center, Color, Element, Fill, Padding, Theme};
 
-use crate::app::{App, Message, board_name_input, clipped_text};
+use crate::app::{App, Message, board_name_input, clipped, clipped_text};
 use crate::domain::{Board, Id};
 use crate::drag::{self, Drag, Item, Target};
 
@@ -53,14 +53,18 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .style(button::text)
             .on_press(Message::ToggleArchivedBoards);
         let rows = archived.iter().filter(|_| app.archived_open).map(|b| {
-            row![
-                clipped_text(b.name.as_str()).width(Fill),
+            // Indented to line up with the Board names above; muted, as they are archived.
+            let name = text(b.name.as_str())
+                .style(text::secondary)
+                .wrapping(text::Wrapping::None);
+            let row = row![
+                clipped(name, text(b.name.as_str())).width(Fill),
                 small("Restore", Message::RestoreBoard(b.id)),
                 small("Delete", Message::AskDeleteBoard(b.id)),
             ]
             .spacing(4)
-            .align_y(Center)
-            .into()
+            .align_y(Center);
+            container(row).padding(Padding::ZERO.left(10)).into()
         });
         column![heading].extend(rows).spacing(4)
     });
