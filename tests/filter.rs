@@ -17,6 +17,7 @@ fn card(title: &str, description: &str, labels: &[Id]) -> Card {
         labels: labels.to_vec(),
         description: description.into(),
         files: Vec::new(),
+        due: None,
     }
 }
 

@@ -162,3 +162,21 @@ fn the_menu_item_reads_saving_image_while_it_runs() {
     assert_eq!(app.notice.as_deref(), Some("Image not saved"));
     assert!(!app.saving_image);
 }
+
+#[test]
+fn an_overdue_cards_due_badge_is_drawn_in_red() {
+    let red = |rows: &[Vec<u8>]| {
+        rows.iter()
+            .flat_map(|r| r.as_chunks::<4>().0)
+            .any(|p| p[0] > 150 && p[1] < 110 && p[2] < 110)
+    };
+    let mut app = app_with(1, &["A"]);
+    let plain = decode(&render(board(&app), &Filter::default(), &Theme::Light).unwrap());
+    let a = board(&app).columns[0].cards[0].id;
+    app.data.set_due(a, Some("2020-01-01".into()));
+
+    let due = decode(&render(board(&app), &Filter::default(), &Theme::Light).unwrap());
+
+    assert!(due.1 > plain.1, "the badge adds a line");
+    assert!(red(&due.2) && !red(&plain.2));
+}

@@ -108,6 +108,9 @@ pub struct Card {
     /// Absolute paths of files on this machine, as the Open dialog gave them; never copied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// ISO calendar date `YYYY-MM-DD` (see `due::parse`); `None` when the Card has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due: Option<String>,
 }
 
 /// A Checklist Item. Edits target it by `id`, never by position.
@@ -354,6 +357,7 @@ impl Data {
             labels: Vec::new(),
             description: String::new(),
             files: Vec::new(),
+            due: None,
         });
         Some(id)
     }

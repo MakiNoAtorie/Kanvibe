@@ -23,6 +23,7 @@ fn card(updated: &str) -> Card {
         labels: Vec::new(),
         description: String::new(),
         files: Vec::new(),
+        due: None,
     }
 }
 

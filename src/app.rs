@@ -205,6 +205,8 @@ pub enum Field {
     LabelName(Id),
     /// The Card's Markdown description, in the open Card's description editor.
     Description(Id),
+    /// The open Card's due date, as typed; written to the Card only on commit.
+    Due(Id),
 }
 
 impl Field {
@@ -215,6 +217,7 @@ impl Field {
             | Field::CardTitle(id)
             | Field::ChecklistItem(id)
             | Field::LabelName(id)
+            | Field::Due(id)
             | Field::Description(id) => id,
         }
     }
@@ -267,6 +270,8 @@ pub enum Message {
     EditChanged(String),
     /// Enter in a single-line field.
     CommitEdit,
+    /// Typing in the open Card's Due field: starts `Field::Due` if needed, then `EditChanged`.
+    DueChanged(Id, String),
     /// Timer while a pending edit has unwritten keystrokes; carries the current time.
     EditTick(Instant),
     /// The window's close button: commits the pending edit, saves, exits.
@@ -789,6 +794,7 @@ impl App {
                         (labels::NEW_INPUT, Input::Edit),
                         (filter::INPUT, Input::Filter),
                         (crate::search::INPUT, Input::Search),
+                        (crate::due::INPUT, Input::Due),
                     ]
                     .into_iter()
                     .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
@@ -815,6 +821,9 @@ impl App {
                 let id = field.id();
                 let start = match field {
                     Field::Description(card) => self.data.description(card),
+                    Field::Due(card) => {
+                        self.data.card(card).map(|c| c.due.as_deref().unwrap_or(""))
+                    }
                     _ => self.data.name(id),
                 };
                 if let Some(start) = start.map(String::from) {
@@ -823,6 +832,7 @@ impl App {
                             self.editor = text_editor::Content::with_text(&start);
                             description::EDITOR
                         }
+                        Field::Due(_) => crate::due::INPUT,
                         _ => EDIT_INPUT,
                     };
                     self.editing = Some(PendingEdit {
@@ -846,6 +856,11 @@ impl App {
             }
             Message::EditChanged(text) => {
                 if let Some(edit) = &mut self.editing {
+                    if let Field::Due(_) = edit.field {
+                        // The stored form is ISO: the typed text waits in the edit for the commit.
+                        edit.text = text;
+                        return Task::none();
+                    }
                     let clash = self.data.is_label_clash(edit.field.id(), &text);
                     let live = if text.trim().is_empty() || clash {
                         &edit.start
@@ -858,6 +873,13 @@ impl App {
                 }
             }
             Message::CommitEdit => _ = self.commit_pending(),
+            Message::DueChanged(card, text) => {
+                let task = match self.editing.as_ref().map(|e| e.field) {
+                    Some(Field::Due(c)) if c == card => Task::none(),
+                    _ => self.update(Message::StartEdit(Field::Due(card))),
+                };
+                return Task::batch([task, self.update(Message::EditChanged(text))]);
+            }
             Message::EditTick(now) => {
                 if let Some(edit) = &mut self.editing
                     && edit.typed_at.is_some_and(|t| now >= t + IDLE_WRITE)
@@ -1256,6 +1278,17 @@ impl App {
                     }
                     if self.data.description(card) != Some(edit.start.as_str()) {
                         self.data.touch(card);
+                    }
+                    self.data.board_of_card(card)
+                }
+                Field::Due(card) => {
+                    // Blank clears; a date that doesn't parse leaves the Card as it was.
+                    let due = match edit.text.trim() {
+                        "" => Some(None),
+                        typed => crate::due::parse(typed).map(Some),
+                    };
+                    if let Some(due) = due {
+                        self.data.set_due(card, due); // touches only on a change
                     }
                     self.data.board_of_card(card)
                 }
@@ -2012,6 +2045,7 @@ impl App {
                 self.labels_row(card),
                 self.view_description(card),
                 self.view_checklist(card),
+                self.view_due(card),
                 self.view_files(card),
                 column![actions, times].spacing(6),
             ]
@@ -2034,7 +2068,7 @@ pub fn local_time(timestamp: &str, tz: &jiff::tz::TimeZone) -> String {
 }
 
 /// A Card's face, unstyled: title, the description's first line, then one metadata row
-/// (Label chips, Checklist progress, files marker).
+/// (due badge, Label chips, Checklist progress, files marker).
 /// Shared by the Board view and the image export.
 pub(crate) fn card_face<'a>(
     board: Option<&'a Board>,
@@ -2042,6 +2076,7 @@ pub(crate) fn card_face<'a>(
     title: Element<'a, Message>,
 ) -> container::Container<'a, Message> {
     let mut meta: Vec<Element<_>> = Vec::new();
+    meta.extend(crate::due::badge(card));
     meta.extend(board.and_then(|b| labels::chips(b, card)));
     meta.extend(
         card.progress()
