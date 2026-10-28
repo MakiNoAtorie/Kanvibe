@@ -62,30 +62,44 @@ impl History {
         true
     }
 
-    /// Steps back: returns the Boards to restore and the Board to show, if any.
-    pub fn undo(&mut self) -> Option<(Vec<Board>, Option<Id>)> {
+    /// Steps back: replaces `boards` with the restored Boards; returns the Board to show, if
+    /// any, or `None` when there is nothing to undo.
+    pub fn undo(&mut self, boards: &mut Vec<Board>) -> Option<Option<Id>> {
         let step = self.undo.pop()?;
         let show = step.show_undo;
-        let restored = self.swap(step, |s, step| s.redo.push(step));
-        Some((restored, show))
+        self.swap(step, boards, |s, step| s.redo.push(step));
+        Some(show)
     }
 
-    /// Steps forward again: returns the Boards to restore and the Board to show, if any.
-    pub fn redo(&mut self) -> Option<(Vec<Board>, Option<Id>)> {
+    /// Steps forward again: as [`Self::undo`].
+    pub fn redo(&mut self, boards: &mut Vec<Board>) -> Option<Option<Id>> {
         let step = self.redo.pop()?;
         let show = step.show_redo;
-        let restored = self.swap(step, |s, step| s.undo.push(step));
-        Some((restored, show))
+        self.swap(step, boards, |s, step| s.undo.push(step));
+        Some(show)
     }
 
     /// Makes `step.boards` the present and pushes the old present as the reverse step.
-    fn swap(&mut self, mut step: Step, push: impl FnOnce(&mut Self, Step)) -> Vec<Board> {
+    /// `boards` becomes a copy of them; a Board equal to its restored self is kept, not copied.
+    fn swap(
+        &mut self,
+        mut step: Step,
+        boards: &mut Vec<Board>,
+        push: impl FnOnce(&mut Self, Step),
+    ) {
         let present = self.present.take().unwrap_or_default();
         let restored = std::mem::replace(&mut step.boards, present);
-        let boards = restored.iter().map(|b| (**b).clone()).collect();
+        let mut current = std::mem::take(boards);
+        *boards = (restored.iter())
+            .map(
+                |r| match current.iter().position(|b| b.id == r.id && *b == **r) {
+                    Some(i) => current.swap_remove(i),
+                    None => (**r).clone(),
+                },
+            )
+            .collect();
         self.present = Some(restored);
         push(self, step);
-        boards
     }
 }
 

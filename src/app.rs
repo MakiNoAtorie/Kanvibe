@@ -654,14 +654,11 @@ impl App {
                 }
                 self.drag = None;
                 let step = match message {
-                    Message::Undo => self.history.undo(),
-                    _ => self.history.redo(),
+                    Message::Undo => self.history.undo(&mut self.data.boards),
+                    _ => self.history.redo(&mut self.data.boards),
                 };
-                if let Some((boards, show)) = step {
-                    self.data.boards = boards;
-                    if show.is_some() {
-                        self.current_board = show;
-                    }
+                if let Some(Some(show)) = step {
+                    self.current_board = Some(show);
                 }
             }
             Message::Key(event) => {
