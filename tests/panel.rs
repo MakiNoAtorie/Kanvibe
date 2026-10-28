@@ -165,6 +165,11 @@ fn double_clicking_a_card_edits_its_title_and_tab_moves_to_the_description() {
         app.editing.as_ref().map(|e| e.field),
         Some(Field::Description(b))
     );
+
+    // A title is edited on its Card face, so editing one selects that Card.
+    let a = card(&app, "A");
+    send(&mut app, [Message::StartEdit(Field::CardTitle(a))]);
+    assert_eq!(app.selection.and_then(|s| s.card), Some(a));
 }
 
 #[test]

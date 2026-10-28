@@ -322,7 +322,7 @@ pub enum Message {
     DragTick,
     /// Open the Card panel on the selected Card.
     OpenPanel,
-    /// Double-click on a Card: select it and edit its title in the panel.
+    /// Double-click on a Card: edit its title on the Card face.
     EditCard(Id),
     /// The panel's X button.
     ClosePanel,
@@ -577,13 +577,7 @@ impl App {
             }
             Message::EditCard(card) => {
                 self.drag = None; // the double-click's own release is no click
-                if let Some(column) = self.data.column_of_card(card) {
-                    let select = self.update(Message::Select(Selection {
-                        column,
-                        card: Some(card),
-                    }));
-                    return Task::batch([select, self.update(Message::EditTitle)]);
-                }
+                return self.update(Message::StartEdit(Field::CardTitle(card)));
             }
             Message::EditTitle => {
                 if let Some(card) = self.open_panel() {
@@ -777,6 +771,14 @@ impl App {
                         start,
                         typed_at: None,
                     });
+                    // A title is edited on its Card face: select it, so it shows and is in view.
+                    if let Field::CardTitle(card) = field
+                        && let Some(column) = self.data.column_of_card(card)
+                    {
+                        let card = Some(card);
+                        self.selection = Some(Selection { column, card });
+                        return Task::batch([operation::focus(focus), self.reveal_selection()]);
+                    }
                     return operation::focus(focus);
                 }
             }
@@ -1362,13 +1364,15 @@ impl App {
             _ => iced::Font::DEFAULT,
         };
         match &self.editing {
-            Some(edit) if edit.field == field => text_input("Name", &edit.text)
-                .id(EDIT_INPUT)
-                .size(size)
-                .font(font)
-                .on_input(Message::EditChanged)
-                .on_submit(Message::CommitEdit)
-                .into(),
+            Some(edit) if edit.field == field && !matches!(field, Field::CardTitle(_)) => {
+                text_input("Name", &edit.text)
+                    .id(EDIT_INPUT)
+                    .size(size)
+                    .font(font)
+                    .on_input(Message::EditChanged)
+                    .on_submit(Message::CommitEdit)
+                    .into()
+            }
             _ => {
                 // The open Card's title wraps: the panel is where it is read in full.
                 let wrapping = match field {
@@ -1622,7 +1626,17 @@ impl App {
                 .drag
                 .as_ref()
                 .is_some_and(|d| d.started && d.item == Item::Card(card.id));
-            let card_box = card_face(self.board(), card)
+            let title: Element<_> = match &self.editing {
+                Some(edit) if edit.field == Field::CardTitle(card.id) => {
+                    text_input("Title", &edit.text)
+                        .id(EDIT_INPUT)
+                        .on_input(Message::EditChanged)
+                        .on_submit(Message::CommitEdit)
+                        .into()
+                }
+                _ => text(&card.title).width(Fill).into(),
+            };
+            let card_box = card_face(self.board(), card, title)
                 .id(card_widget(card.id))
                 .style(move |theme| {
                     let style = outline(theme);
@@ -1809,21 +1823,18 @@ impl App {
 pub(crate) fn card_face<'a>(
     board: Option<&'a Board>,
     card: &'a Card,
+    title: Element<'a, Message>,
 ) -> container::Container<'a, Message> {
     let chips = board.and_then(|b| labels::chips(b, card));
     container(
-        column![
-            row![text(&card.title).width(Fill)]
-                .extend(description::face_icon(card))
-                .spacing(6)
-        ]
-        .spacing(4)
-        .extend(chips)
-        .extend(
-            card.progress()
-                // ✓, not ☑: that renders as a colour emoji competing with the chips.
-                .map(|p| text(format!("✓ {p}")).size(12).into()),
-        ),
+        column![row![title].extend(description::face_icon(card)).spacing(6)]
+            .spacing(4)
+            .extend(chips)
+            .extend(
+                card.progress()
+                    // ✓, not ☑: that renders as a colour emoji competing with the chips.
+                    .map(|p| text(format!("✓ {p}")).size(12).into()),
+            ),
     )
     .width(Fill)
     .padding([9, 11])

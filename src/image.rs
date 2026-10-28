@@ -99,7 +99,11 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
             .cards
             .iter()
             .filter(|c| s.filter.matches(c, &s.board.labels));
-        let cards = cards.map(|c| card_face(Some(&s.board), c).style(card_style).into());
+        let cards = cards.map(|c| {
+            card_face(Some(&s.board), c, text(&c.title).width(Fill).into())
+                .style(card_style)
+                .into()
+        });
         let cards = column(cards).spacing(6);
         container(column![header, cards].spacing(8))
             .width(COLUMN as f32)
