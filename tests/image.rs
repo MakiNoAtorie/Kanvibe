@@ -59,6 +59,20 @@ fn a_small_board_renders_to_a_png_of_the_column_width_with_the_background_croppe
     assert!(!all_white(&rows[height as usize - 13]));
 }
 
+#[test]
+fn a_collapsed_column_renders_as_a_48_px_strip() {
+    let shot = |app: &App| decode(&render(board(app), &Filter::default(), &Theme::Light).unwrap());
+    let mut app = app_with(3, &["A", "B"]);
+    let expanded = shot(&app).1;
+    let first = board(&app).columns[0].id;
+    app.data.toggle_collapse(first);
+    let (width, height, _) = shot(&app);
+    // 12 px padding each side, a 48 px strip and two 280 px Columns 12 px apart.
+    assert_eq!(width, 656);
+    // The strip hides its Cards.
+    assert!(height < expanded, "{height} vs {expanded}");
+}
+
 fn too_large(size: &str) -> String {
     format!(
         "Board too large for one image ({size} px; limit 8192). \

@@ -182,7 +182,7 @@ fn an_older_version_is_migrated_and_its_original_kept_as_a_versioned_copy() {
         json
     );
     let saved = fs::read_to_string(dir.join("kanvibe.json")).unwrap();
-    assert!(saved.contains("\"version\": 1"), "{saved}");
+    assert!(saved.contains("\"version\": 2"), "{saved}");
     assert_eq!(storage::load(&dir).unwrap().unwrap().0.boards.len(), 2);
 }
 

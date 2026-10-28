@@ -56,6 +56,9 @@ pub struct Column {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::repair::limit")]
     pub limit: Option<u32>,
+    /// Folded to a narrow strip; its Cards are hidden but still counted and still take drops.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub collapsed: bool,
     #[serde(default)]
     pub cards: Vec<Card>,
 }
@@ -161,6 +164,7 @@ impl Data {
                 id: self.new_id(),
                 name: name.into(),
                 limit: None,
+                collapsed: false,
                 cards: Vec::new(),
             })
             .into();
@@ -274,9 +278,21 @@ impl Data {
             id,
             name: "New column".into(),
             limit: None,
+            collapsed: false,
             cards: Vec::new(),
         });
         Some(id)
+    }
+
+    /// Collapses an expanded Column, or expands a collapsed one. Unknown Column: nothing.
+    pub fn toggle_collapse(&mut self, column: Id) -> Option<()> {
+        let column = self
+            .boards
+            .iter_mut()
+            .flat_map(|b| &mut b.columns)
+            .find(|c| c.id == column)?;
+        column.collapsed = !column.collapsed;
+        Some(())
     }
 
     /// Sets the Column Limit from typed text: a positive integer, or blank to remove it.
@@ -388,6 +404,7 @@ impl Data {
                 id,
                 name: "To do".into(),
                 limit: None,
+                collapsed: false,
                 cards: Vec::new(),
             });
         }
@@ -444,6 +461,7 @@ impl Data {
                 id,
                 name: "To do".into(),
                 limit: None,
+                collapsed: false,
                 cards: Vec::new(),
             });
         }

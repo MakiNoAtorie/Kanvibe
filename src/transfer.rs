@@ -12,7 +12,7 @@ use crate::app::{App, Message, dialog};
 use crate::domain::{Board, Data, Id};
 
 const FORMAT: &str = "kanvibe-board";
-const VERSION: u32 = 1;
+use crate::storage::VERSION;
 
 #[derive(Serialize)]
 struct FileOut<'a> {
@@ -21,7 +21,7 @@ struct FileOut<'a> {
     board: &'a Board,
 }
 
-/// Writes `{ "format": "kanvibe-board", "version": 1, "board": ... }`, pretty-printed.
+/// Writes `{ "format": "kanvibe-board", "version": 2, "board": ... }`, pretty-printed.
 /// The Board carries its Labels, Columns, Cards, Checklists and archived Cards; no settings.
 pub fn export(path: &Path, board: &Board) -> io::Result<()> {
     let file = FileOut {

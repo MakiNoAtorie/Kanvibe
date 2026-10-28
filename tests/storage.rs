@@ -44,7 +44,7 @@ fn round_trip_keeps_boards_columns_cards_and_next_id_pretty_printed() {
     assert_eq!(loaded.next_id, 10);
     assert_eq!(loaded_settings, settings);
     let text = fs::read_to_string(dir.join("kanvibe.json")).unwrap();
-    assert!(text.starts_with("{\n  \"version\": 1,\n"), "{text}");
+    assert!(text.starts_with("{\n  \"version\": 2,\n"), "{text}");
 }
 
 /// What the iced update function does: `update`, then start a save if anything changed. Here
@@ -285,7 +285,7 @@ fn second_copy_cannot_take_the_lock_until_the_first_lets_go() {
 #[test]
 fn newer_version_is_refused_and_the_file_left_alone() {
     let (_tmp, dir) = data_dir();
-    let json = r#"{ "version": 2, "next_id": 1, "boards": [], "future": true }"#;
+    let json = r#"{ "version": 3, "next_id": 1, "boards": [], "future": true }"#;
     fs::write(dir.join("kanvibe.json"), json).unwrap();
 
     assert!(matches!(storage::load(&dir), Err(LoadError::Newer)));
@@ -297,7 +297,7 @@ fn newer_version_leaves_a_leftover_tmp_alone() {
     let (_tmp, dir) = data_dir();
     fs::write(
         dir.join("kanvibe.json"),
-        r#"{ "version": 2, "next_id": 1 }"#,
+        r#"{ "version": 3, "next_id": 1 }"#,
     )
     .unwrap();
     fs::write(dir.join("kanvibe.json.tmp"), "half a save").unwrap();
@@ -506,7 +506,7 @@ fn each_load_class_reaches_its_screen() {
         "first run"
     );
 
-    fs::write(dir.join("kanvibe.json"), r#"{ "version": 2 }"#).unwrap();
+    fs::write(dir.join("kanvibe.json"), r#"{ "version": 3 }"#).unwrap();
     let screen = Screen::open(dir.clone());
     assert!(matches!(problem(&screen).unwrap().error, LoadError::Newer));
 
