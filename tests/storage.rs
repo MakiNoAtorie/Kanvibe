@@ -534,9 +534,10 @@ fn each_load_class_reaches_its_screen() {
     assert!(matches!(problem(&screen).unwrap().error, LoadError::Io(_)));
 
     fs::remove_dir(dir.join("kanvibe.json")).unwrap();
-    storage::save(&dir, &sample(), &Settings::default()).unwrap();
+    let data = sample(); // one sample: its timestamps differ across a second boundary
+    storage::save(&dir, &data, &Settings::default()).unwrap();
     let _ = screen.update(startup::Message::Retry);
-    assert_eq!(opened(screen).data, sample(), "Retry loads again");
+    assert_eq!(opened(screen).data, data, "Retry loads again");
 }
 
 #[test]
