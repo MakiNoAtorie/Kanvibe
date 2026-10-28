@@ -86,8 +86,8 @@ pub struct App {
     pub label_picker: Option<LabelPicker>,
     /// The "Move to Board…" picker for this Card; see `move_board`.
     pub move_picker: Option<Id>,
-    /// The dark theme. Saved in the settings.
-    pub dark: bool,
+    /// The theme. Saved in the settings.
+    pub skin: crate::skin::Skin,
     /// Window geometry and the maximised flag. Saved with the next save, never a save on its own.
     pub window: crate::chrome::WindowState,
     /// The F1 shortcuts overlay is open.
@@ -385,8 +385,8 @@ pub enum Message {
     NewLabelChanged(String),
     NewLabelColor(String),
     CreateLabel,
-    /// The theme button in the sidebar footer.
-    ToggleTheme,
+    /// A pick from the sidebar footer's theme list.
+    SetTheme(crate::skin::Skin),
     /// The window was resized (logical pixels).
     Resized(iced::Size),
     /// The window was moved (logical pixels).
@@ -1039,7 +1039,7 @@ impl App {
                 }
             }
             Message::ToggleSidebar => self.sidebar_collapsed = !self.sidebar_collapsed,
-            Message::ToggleTheme => self.dark = !self.dark,
+            Message::SetTheme(skin) => self.skin = skin,
             Message::ShowShortcuts => self.shortcuts = true,
             Message::OpenDataFolder => {
                 if let Some(dir) = &self.data_dir {
@@ -1548,7 +1548,16 @@ impl App {
         }
     }
 
+    /// The app over the theme's page (a gradient on some themes).
     pub fn view(&self) -> Element<'_, Message> {
+        container(self.view_app())
+            .width(Fill)
+            .height(Fill)
+            .style(crate::skin::page)
+            .into()
+    }
+
+    fn view_app(&self) -> Element<'_, Message> {
         let content = match self.board() {
             _ if self.search.is_some() => self.view_search(),
             Some(board) if self.archive == Some(board.id) => self.view_archive(board),
@@ -1877,9 +1886,13 @@ impl App {
         .spacing(8)
         .align_y(Center);
         // A selected Column tints its header instead of outlining the whole Column.
-        let header = container(header)
-            .padding([2, 4])
-            .style(header_tint(selection.is_some()));
+        let header = container(header).padding([2, 4]).style({
+            let (id, selected) = (col.id, selection.is_some());
+            move |theme: &Theme| {
+                crate::skin::header(theme, id, selected)
+                    .unwrap_or_else(|| header_tint(selected)(theme))
+            }
+        });
         let header = drag::source(header, item);
         let menu: Option<Element<_>> = match &self.limit_input {
             Some(input) if input.column == col.id => Some(
@@ -1945,7 +1958,7 @@ impl App {
         .width(COLUMN_WIDTH)
         .height(Fill)
         .padding(8)
-        .style(column_style);
+        .style(column_style(col.id));
         // Cards and buttons capture their clicks, so this only fires on the Column's empty area.
         let area = mouse_area(column_box).on_press(Message::Select(Selection {
             column: col.id,
@@ -1968,7 +1981,7 @@ impl App {
         let strip = strip_face(col, count)
             .id(column_widget(col.id))
             .height(Fill)
-            .style(outlined(column_style, selected || hovered));
+            .style(outlined(column_style(col.id), selected || hovered));
         // A press without a drag is a click: `DragEnd` expands the Column.
         let area = drag::source(strip, Item::Column(col.id));
         drag::target(area, Target::Column(col.id), dragging).into()
@@ -2155,7 +2168,7 @@ pub(crate) fn pill<'a>(label: String, tone: Tone) -> Element<'a, Message> {
             container::Style {
                 background: Some(background.into()),
                 text_color: Some(text),
-                border: Border::default().rounded(10),
+                border: Border::default().rounded(crate::skin::pill_radius(theme)),
                 ..container::Style::default()
             }
         })
@@ -2350,21 +2363,29 @@ pub(crate) fn fade_text(style: container::Style, alpha: f32) -> container::Style
     }
 }
 
-/// A Column: a tray (the weaker tier, a shade off the page), rounded, flat (the image
-/// export's too).
-pub(crate) fn column_style(theme: &Theme) -> container::Style {
-    let palette = theme.extended_palette();
-    container::Style {
-        background: Some(palette.background.weaker.color.into()),
-        text_color: Some(palette.background.weaker.text),
-        border: Border::default().rounded(COLUMN_RADIUS),
-        ..container::Style::default()
+/// A Column (expanded or a strip): a tray (the weaker tier, a shade off the page), rounded,
+/// flat (the image export's too). The Column picks its tint on the Tinted theme.
+pub(crate) fn column_style(column: Id) -> impl Fn(&Theme) -> container::Style + Copy {
+    move |theme| {
+        if let Some(style) = crate::skin::column(theme, column) {
+            return style;
+        }
+        let palette = theme.extended_palette();
+        container::Style {
+            background: Some(palette.background.weaker.color.into()),
+            text_color: Some(palette.background.weaker.text),
+            border: Border::default().rounded(COLUMN_RADIUS),
+            ..container::Style::default()
+        }
     }
 }
 
 /// A Card: the lightest tier with a hairline edge and a one-pixel shadow (the
 /// image export's too).
 pub(crate) fn card_style(theme: &Theme) -> container::Style {
+    if let Some(style) = crate::skin::card(theme) {
+        return style;
+    }
     let bg = theme.extended_palette().background;
     container::Style {
         background: Some(bg.weakest.color.into()),
@@ -2384,12 +2405,15 @@ pub(crate) fn card_style(theme: &Theme) -> container::Style {
 
 /// `base`, with a 2px primary-colour border when `selected`.
 pub(crate) fn outlined(
-    base: fn(&Theme) -> container::Style,
+    base: impl Fn(&Theme) -> container::Style,
     selected: bool,
 ) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
         let style = base(theme);
         if !selected {
+            return style;
+        }
+        if let Some(style) = crate::skin::selected(theme, style) {
             return style;
         }
         container::Style {
@@ -2578,7 +2602,7 @@ impl App {
         let current_board = last.or(data.boards.iter().find(|b| !b.archived).map(|b| b.id));
         Ok(App {
             sidebar_collapsed: settings.sidebar_collapsed,
-            dark: settings.dark,
+            skin: settings.skin,
             window: crate::chrome::WindowState::new(settings.window, settings.maximized),
             saved: (data.clone(), settings),
             data,
@@ -2659,7 +2683,7 @@ impl App {
         Settings {
             last_board: self.current_board,
             sidebar_collapsed: self.sidebar_collapsed,
-            dark: self.dark,
+            skin: self.skin,
             window: self.window.geometry,
             maximized: self.window.maximized,
         }

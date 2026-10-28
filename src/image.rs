@@ -117,7 +117,7 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
         let shown = |c: &_| s.filter.matches(c, &s.board.labels);
         let count = count_badge(s.filter.count_label(col, shown), col.over_limit());
         if col.collapsed {
-            return strip_face(col, count).style(column_style).into();
+            return strip_face(col, count).style(column_style(col.id)).into();
         }
         let name = text(&col.name)
             .size(COLUMN_NAME_SIZE)
@@ -143,7 +143,7 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
         container(column![header, cards].spacing(8))
             .width(COLUMN as f32)
             .padding(8)
-            .style(column_style)
+            .style(column_style(col.id))
             .into()
     });
     column![

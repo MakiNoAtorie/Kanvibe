@@ -1,13 +1,12 @@
 //! Window chrome (#23): theme, window geometry, the shortcuts overlay and the data-folder opener.
 use std::path::Path;
 use std::process::Command;
-use std::sync::LazyLock;
 
-use iced::theme::{Palette, palette};
-use iced::widget::{button, column, row, text, tooltip};
-use iced::{Color, Element, Point, Size, Task, Theme, color, window};
+use iced::widget::{button, column, pick_list, row, text, tooltip};
+use iced::{Element, Point, Size, Task, Theme, window};
 
 use crate::app::{App, Message, dialog};
+use crate::skin::Skin;
 use crate::storage::Geometry;
 
 /// Every keyboard shortcut, for the F1 overlay. Add a row when `keys::map` learns a key.
@@ -146,67 +145,6 @@ pub fn logical(x: i32, y: i32, width: u32, height: u32, scale: f32) -> Geometry 
     }
 }
 
-/// The three layers both themes choose rather than derive, stored in the background tiers
-/// every style reads: `base` is the page, `weaker` the Column, `weakest` the Card (and raised
-/// buttons), `weak` the hairline border.
-fn layers(
-    mut extended: palette::Extended,
-    p: Palette,
-    column: Color,
-    card: Color,
-    border: Color,
-) -> palette::Extended {
-    extended.background.base = palette::Pair::new(p.background, p.text);
-    extended.background.weaker = palette::Pair::new(column, p.text);
-    extended.background.weakest = palette::Pair::new(card, p.text);
-    extended.background.weak = palette::Pair::new(border, p.text);
-    extended
-}
-
-/// The light theme: white Cards on a grey Column on a warm `#f7f7f5` page. The other tiers
-/// come from a neutral page: iced's darkening multiplies a warm page's chroma into olive.
-static LIGHT: LazyLock<Theme> = LazyLock::new(|| {
-    let paper = Palette {
-        background: color!(0xf7f7f5),
-        text: color!(0x222222),
-        ..Palette::LIGHT
-    };
-    Theme::custom_with_fn("Kanvibe Light", paper, |p| {
-        let neutral = Palette {
-            background: color!(0xf7f7f7),
-            ..p
-        };
-        let extended = palette::Extended::generate(neutral);
-        layers(
-            extended,
-            p,
-            color!(0xecece9),
-            Color::WHITE,
-            color!(0xdcdcd8),
-        )
-    })
-});
-
-/// The dark theme: the same three steps, each lighter than the one below, with iced's dark
-/// primary and danger.
-static DARK: LazyLock<Theme> = LazyLock::new(|| {
-    let night = Palette {
-        background: color!(0x1b1b1d),
-        text: color!(0xe6e6e6),
-        ..Palette::DARK
-    };
-    Theme::custom_with_fn("Kanvibe Dark", night, |p| {
-        let extended = palette::Extended::generate(p);
-        layers(
-            extended,
-            p,
-            color!(0x242428),
-            color!(0x2e2e33),
-            color!(0x3a3a40),
-        )
-    })
-});
-
 /// The connected monitors; empty if the system won't say (then nothing is dropped as off-screen).
 pub fn monitors() -> Vec<Geometry> {
     display_info::DisplayInfo::all()
@@ -217,18 +155,14 @@ pub fn monitors() -> Vec<Geometry> {
 }
 
 impl App {
-    /// The light or dark iced theme.
+    /// The iced theme of the chosen [`Skin`](crate::skin::Skin).
     pub fn theme(&self) -> Theme {
-        if self.dark {
-            DARK.clone()
-        } else {
-            LIGHT.clone()
-        }
+        self.skin.theme()
     }
 
     /// The description highlighter's theme, following the app theme.
     pub fn highlighter_theme(&self) -> iced::highlighter::Theme {
-        if self.dark {
+        if self.theme().extended_palette().is_dark {
             iced::highlighter::Theme::Base16Ocean
         } else {
             iced::highlighter::Theme::InspiredGitHub
@@ -305,15 +239,23 @@ pub fn tip<'a>(
     .into()
 }
 
-/// The sidebar footer's last three buttons: theme, Keyboard shortcuts, Open data folder.
+/// The sidebar footer's last three rows: the theme list, Keyboard shortcuts, Open data folder.
 pub fn footer(app: &App) -> Element<'_, Message> {
-    let (theme, switch) = if app.dark {
-        ("Light theme", "Switch to the light theme")
-    } else {
-        ("Dark theme", "Switch to the dark theme")
-    };
+    // The list's label lines up with the links below (their 13px text and button padding).
+    let theme = row![
+        text("Theme").size(13).style(|theme: &Theme| text::Style {
+            color: Some(theme.palette().text.scale_alpha(0.7)),
+        }),
+        pick_list(&Skin::ALL[..], Some(app.skin), Message::SetTheme)
+            .text_size(13)
+            .padding([2, 8])
+            .width(iced::Fill),
+    ]
+    .spacing(8)
+    .padding(iced::Padding::ZERO.left(10))
+    .align_y(iced::Center);
     column![
-        tip(link(theme, Message::ToggleTheme), switch),
+        theme,
         tip(
             link("Keyboard shortcuts", Message::ShowShortcuts),
             "Keyboard shortcuts (F1)"

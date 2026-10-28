@@ -101,6 +101,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
 
 /// Between the page and the raised surface, with a hairline edge.
 fn style(theme: &Theme) -> container::Style {
+    if let Some(style) = crate::skin::sidebar(theme) {
+        return style;
+    }
     let bg = theme.extended_palette().background;
     container::Style {
         background: Some(iced::theme::palette::mix(bg.base.color, bg.weakest.color, 0.5).into()),

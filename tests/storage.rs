@@ -313,7 +313,7 @@ fn newer_version_leaves_a_leftover_tmp_alone() {
 fn settings_are_written_as_theme_and_one_window_object() {
     let (_tmp, dir) = data_dir();
     let settings = Settings {
-        dark: true,
+        skin: kanvibe::skin::Skin::Dark,
         window: Some(storage::Geometry {
             x: 10.0,
             y: 20.0,
@@ -1028,4 +1028,22 @@ fn the_window_title_names_the_current_board() {
         let _ = app.update(message);
     }
     assert_eq!(Screen::App(app).title(), "Work – Kanvibe");
+}
+
+#[test]
+fn every_theme_is_saved_by_its_key_and_an_unknown_one_is_light() {
+    for skin in kanvibe::skin::Skin::ALL {
+        let settings = Settings {
+            skin,
+            ..Settings::default()
+        };
+        let text = serde_json::to_string(&settings).unwrap();
+        assert!(
+            text.contains(&format!(r#""theme":"{}""#, skin.key())),
+            "{text}"
+        );
+        assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), settings);
+    }
+    let sepia: Settings = serde_json::from_str(r#"{ "theme": "sepia" }"#).unwrap();
+    assert_eq!(sepia.skin, kanvibe::skin::Skin::Light);
 }

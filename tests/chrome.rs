@@ -6,6 +6,7 @@ use iced::{Point, Size, window};
 use kanvibe::app::{App, Message};
 use kanvibe::chrome;
 use kanvibe::keys::{self, Context};
+use kanvibe::skin::Skin;
 use kanvibe::storage::{self, Geometry, Settings};
 
 /// What the iced update function does: `update`, then run any save at once.
@@ -64,14 +65,17 @@ fn place(app: &mut App, g: Geometry, maximized: bool) {
 // --- Theme ---
 
 #[test]
-fn theme_is_light_until_toggled_and_toggles_back() {
+fn theme_is_light_and_any_theme_can_be_picked() {
     let mut app = App::default();
-    let light = app.theme();
-    assert!(!light.extended_palette().is_dark);
-    send(&mut app, [Message::ToggleTheme]);
+    assert_eq!(Skin::of(&app.theme()), Skin::Light);
+    assert!(!app.theme().extended_palette().is_dark);
+    for skin in Skin::ALL {
+        send(&mut app, [Message::SetTheme(skin)]);
+        assert_eq!(app.skin, skin);
+        assert_eq!(Skin::of(&app.theme()), skin);
+    }
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
     assert!(app.theme().extended_palette().is_dark);
-    send(&mut app, [Message::ToggleTheme]);
-    assert_eq!(app.theme(), light);
 }
 
 #[test]
@@ -79,7 +83,7 @@ fn highlighter_theme_follows_the_app_theme() {
     use iced::highlighter::Theme as Highlight;
     let mut app = App::default();
     let light = app.highlighter_theme();
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
     assert_ne!(app.highlighter_theme(), light);
     assert_eq!(app.highlighter_theme(), Highlight::Base16Ocean);
 }
@@ -88,8 +92,8 @@ fn highlighter_theme_follows_the_app_theme() {
 fn theme_is_remembered_between_launches() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = app_in(tmp.path());
-    send(&mut app, [Message::ToggleTheme]);
-    assert!(saved_settings(tmp.path()).dark);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
+    assert_eq!(saved_settings(tmp.path()).skin, Skin::Dark);
     assert!(opened(tmp.path()).theme().extended_palette().is_dark);
 }
 
@@ -108,7 +112,7 @@ fn geometry_is_written_with_the_next_save_but_never_triggers_one() {
         before
     );
 
-    send(&mut app, [Message::ToggleTheme]); // a real change carries it along
+    send(&mut app, [Message::SetTheme(Skin::Dark)]); // a real change carries it along
     assert_eq!(
         saved_settings(tmp.path()).window,
         Some(geometry(40.0, 50.0, 1000.0, 700.0))
@@ -124,7 +128,7 @@ fn maximised_flag_is_saved_apart_and_keeps_the_restored_rectangle() {
     // Maximising reports the screen-sized rectangle, then the flag.
     place(&mut app, geometry(-8.0, -8.0, 1936.0, 1096.0), true);
     assert!(app.save_if_changed().is_none());
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
 
     let settings = saved_settings(tmp.path());
     assert!(settings.maximized);
@@ -138,7 +142,7 @@ fn minimised_position_is_not_saved() {
     place(&mut app, geometry(40.0, 50.0, 1000.0, 700.0), false);
     // Windows parks a minimised window at -32000,-32000 (logical: divided by the scale).
     place(&mut app, geometry(-16000.0, -16000.0, 0.0, 0.0), false);
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
     assert_eq!(
         saved_settings(tmp.path()).window,
         Some(geometry(40.0, 50.0, 1000.0, 700.0))
@@ -157,7 +161,7 @@ fn a_move_alone_updates_the_saved_position() {
             Message::Maximized(false),
         ],
     );
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
     assert_eq!(
         saved_settings(tmp.path()).window,
         Some(geometry(300.0, 200.0, 1000.0, 700.0))
@@ -169,10 +173,10 @@ fn saved_geometry_survives_a_launch_that_never_moves_the_window() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = app_in(tmp.path());
     place(&mut app, geometry(40.0, 50.0, 1000.0, 700.0), false);
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
 
     let mut again = opened(tmp.path());
-    send(&mut again, [Message::ToggleTheme]);
+    send(&mut again, [Message::SetTheme(Skin::Paper)]);
     assert_eq!(
         saved_settings(tmp.path()).window,
         Some(geometry(40.0, 50.0, 1000.0, 700.0))
@@ -208,7 +212,7 @@ fn on_screen_rectangle_is_restored() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = app_in(tmp.path());
     place(&mut app, geometry(40.0, 50.0, 1000.0, 700.0), false);
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
 
     let mut app = opened(tmp.path());
     let settings = app.fit_window(&[MONITOR]);
@@ -225,13 +229,13 @@ fn off_screen_rectangle_opens_centred_at_1280_by_720_and_is_dropped() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = app_in(tmp.path());
     place(&mut app, geometry(5000.0, 50.0, 1000.0, 700.0), false); // the unplugged monitor
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
 
     let mut app = opened(tmp.path());
     let settings = app.fit_window(&[MONITOR]);
     assert_eq!(settings.size, Size::new(1280.0, 720.0));
     assert!(matches!(settings.position, window::Position::Centered));
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Paper)]);
     assert_eq!(saved_settings(tmp.path()).window, None);
 }
 
@@ -247,7 +251,7 @@ fn maximised_flag_is_restored() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = app_in(tmp.path());
     place(&mut app, geometry(40.0, 50.0, 1000.0, 700.0), true);
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
     assert!(opened(tmp.path()).fit_window(&[MONITOR]).maximized);
 }
 
@@ -321,7 +325,7 @@ fn minimising_a_maximised_window_keeps_the_restored_rectangle_and_the_flag() {
     place(&mut app, geometry(-8.0, -8.0, 1936.0, 1096.0), true);
     // Minimised: Windows reports 0x0 at -32000,-32000, and no longer says maximised.
     place(&mut app, geometry(-16000.0, -16000.0, 0.0, 0.0), false);
-    send(&mut app, [Message::ToggleTheme]);
+    send(&mut app, [Message::SetTheme(Skin::Dark)]);
 
     let settings = saved_settings(tmp.path());
     assert!(settings.maximized, "it comes back maximised");

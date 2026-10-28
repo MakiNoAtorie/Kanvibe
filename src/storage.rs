@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{Board, Data, Id};
+use crate::skin::Skin;
 
 const FILE: &str = "kanvibe.json";
 const TMP: &str = "kanvibe.json.tmp";
@@ -19,14 +20,14 @@ pub(crate) const VERSION: u32 = 2;
 const STALE: Duration = Duration::from_secs(24 * 3600);
 
 /// App settings saved beside the Boards. Missing fields take defaults. In the file (see
-/// `SettingsFile`) the theme is `"theme": "light" | "dark"` and the window one object.
+/// `SettingsFile`) the theme is `"theme": "<Skin::key>"` and the window one object.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(from = "SettingsFile", into = "SettingsFile")]
 pub struct Settings {
     pub last_board: Option<Id>,
     pub sidebar_collapsed: bool,
-    /// The dark theme; light by default.
-    pub dark: bool,
+    /// Light by default.
+    pub skin: Skin,
     /// The window's restored (neither minimised nor maximised) rectangle, in logical pixels.
     pub window: Option<Geometry>,
     pub maximized: bool,
@@ -39,7 +40,7 @@ struct SettingsFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     last_board: Option<Id>,
     sidebar_collapsed: bool,
-    /// "dark", else light.
+    /// A `Skin::key`; unknown or missing is light.
     theme: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
@@ -68,7 +69,7 @@ impl From<SettingsFile> for Settings {
         Settings {
             last_board: f.last_board,
             sidebar_collapsed: f.sidebar_collapsed,
-            dark: f.theme == "dark",
+            skin: Skin::from_key(&f.theme),
             window: window.rect.map(|r| Geometry {
                 x: r.x,
                 y: r.y,
@@ -91,7 +92,7 @@ impl From<Settings> for SettingsFile {
         SettingsFile {
             last_board: s.last_board,
             sidebar_collapsed: s.sidebar_collapsed,
-            theme: if s.dark { "dark" } else { "light" }.into(),
+            theme: s.skin.key().into(),
             window: (rect.is_some() || s.maximized).then_some(WindowFile {
                 rect,
                 maximized: s.maximized,

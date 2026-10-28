@@ -16,6 +16,7 @@ pub mod move_board;
 pub mod repair;
 pub mod search;
 pub mod sidebar;
+pub mod skin;
 pub mod startup;
 pub mod storage;
 pub mod transfer;
