@@ -5,6 +5,14 @@ use iced::{Center, Element, Fill};
 use crate::app::{App, Confirm, Message, Selection, clipped, clipped_text};
 use crate::domain::{Board, Column, Data, Id, cards};
 
+/// The Archive view's list, scrolled to a Card picked in Search.
+pub(crate) const SCROLL: &str = "archive";
+
+/// An archived Card's row in the Archive view.
+pub(crate) fn row_widget(card: Id) -> iced::widget::Id {
+    iced::widget::Id::from(format!("archived-{card}"))
+}
+
 /// One line of the Archive view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
@@ -167,13 +175,16 @@ impl App {
         let list: Element<_> = if rows.is_empty() {
             text("No archived Cards").into()
         } else {
-            scrollable(column(rows.into_iter().map(archived_row)).spacing(6)).into()
+            scrollable(column(rows.into_iter().map(archived_row)).spacing(6))
+                .id(SCROLL)
+                .into()
         };
         column![header, list].spacing(12).padding(12).into()
     }
 }
 
 fn archived_row<'a>(row_: Row) -> Element<'a, Message> {
+    let id = row_widget(row_.card);
     container(
         row![
             clipped_text(row_.title).width(Fill),
@@ -195,6 +206,7 @@ fn archived_row<'a>(row_: Row) -> Element<'a, Message> {
         .spacing(8)
         .align_y(Center),
     )
+    .id(id)
     .padding(8)
     .style(container::bordered_box)
     .into()

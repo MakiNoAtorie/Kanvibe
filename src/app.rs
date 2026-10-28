@@ -105,6 +105,8 @@ pub struct App {
     pub filter_kept: Vec<Id>,
     /// The Labels filter list under the Board header is open.
     pub filter_menu: bool,
+    /// The Search view replacing the Columns; `None` = closed. See `search`.
+    pub search: Option<crate::search::Search>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -426,6 +428,15 @@ pub enum Message {
     /// Esc captured by a focused text box (it has already unfocused): the "leave the text
     /// field" layer. Only the filter box keeps no state, so then nothing else happens.
     LeaveField,
+    /// Ctrl+Shift+F or "Search" in the sidebar: open the Search view.
+    OpenSearch,
+    SearchChanged(String),
+    /// Up/Down in the search box: move the highlighted hit.
+    SearchMove(Direction),
+    /// A click on a hit, or Enter on the highlighted one: open its Board on the Card.
+    SearchPick(Id),
+    /// "Back to Board".
+    CloseSearch,
 }
 
 /// A question over the dimmed app (`App.confirm`). Confirm sends `action`; Esc or Cancel drops it.
@@ -437,6 +448,9 @@ pub struct Confirm {
 
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        if let Message::SearchPick(card) = message {
+            return self.pick(card); // nested updates; see `pick`
+        }
         let (board, order): (_, Vec<Id>) = (
             self.current_board,
             self.data.boards.iter().map(|b| b.id).collect(),
@@ -512,6 +526,7 @@ impl App {
             Message::Escape if self.confirm.is_some() => self.confirm = None,
             Message::Escape if self.label_picker.is_some() => self.escape_labels(),
             Message::Escape if self.move_picker.is_some() => self.move_picker = None,
+            Message::Escape if self.search.is_some() && !self.field_open() => self.search = None,
             Message::Escape => {
                 // One layer per press: the text field, the Archive view, the Card panel, the
                 // Filter, then the selection.
@@ -656,6 +671,11 @@ impl App {
             | Message::ToggleFilterMenu
             | Message::FilterLabel(_)
             | Message::LeaveField => return self.update_filter(message),
+            Message::OpenSearch
+            | Message::SearchChanged(_)
+            | Message::SearchMove(_)
+            | Message::SearchPick(_)
+            | Message::CloseSearch => return self.update_search(message),
             Message::OpenMove => self.open_move(),
             Message::CloseMove => self.move_picker = None,
             Message::MoveToBoard(card, board) => {
@@ -737,6 +757,7 @@ impl App {
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
                         (labels::NEW_INPUT, Input::Edit),
                         (filter::INPUT, Input::Filter),
+                        (crate::search::INPUT, Input::Search),
                     ]
                     .into_iter()
                     .find_map(|(name, input)| (id == widget::Id::new(name)).then_some(input))
@@ -749,7 +770,8 @@ impl App {
                     Message::Escape => true,
                     _ if self.dialog_open() => false,
                     Message::Undo | Message::Redo | Message::ShowShortcuts => true,
-                    _ => self.archive.is_none(),
+                    Message::OpenSearch | Message::SearchMove(_) => true,
+                    _ => self.archive.is_none() && self.search.is_none(),
                 };
                 if let Some(message) = message.filter(allowed) {
                     return self.update(message);
@@ -907,6 +929,7 @@ impl App {
             Message::CopySaved(None) => {}
             Message::OpenBoard(board) => {
                 self.commit_pending();
+                self.search = None;
                 if self.data.active_board(board).is_some() {
                     self.current_board = Some(board);
                 }
@@ -1267,6 +1290,7 @@ impl App {
         self.board_menu = false;
         self.panel = None;
         self.archive = None;
+        self.search = None;
         self.clear_filter();
         self.filter_menu = false;
     }
@@ -1419,6 +1443,7 @@ impl App {
 
     pub fn view(&self) -> Element<'_, Message> {
         let content = match self.board() {
+            _ if self.search.is_some() => self.view_search(),
             Some(board) if self.archive == Some(board.id) => self.view_archive(board),
             Some(board) => self.view_board(board),
             None => self.view_empty(),
@@ -1978,7 +2003,7 @@ pub fn scroll_to_show(start: f32, len: f32, offset: f32, viewport: f32) -> Optio
 }
 
 /// Scrolls `scrollable` so its descendant `child` is fully visible along one axis.
-fn reveal(scrollable: widget::Id, child: widget::Id, horizontal: bool) -> Task<Message> {
+pub(crate) fn reveal(scrollable: widget::Id, child: widget::Id, horizontal: bool) -> Task<Message> {
     selector::find(scrollable.clone()).and_then(move |area| {
         let scrollable = scrollable.clone();
         selector::find(child.clone()).and_then(move |child| {
@@ -2099,7 +2124,7 @@ pub(crate) fn card_style(theme: &Theme) -> container::Style {
 }
 
 /// `base`, with a 2px primary-colour border when `selected`.
-fn outlined(
+pub(crate) fn outlined(
     base: fn(&Theme) -> container::Style,
     selected: bool,
 ) -> impl Fn(&Theme) -> container::Style {

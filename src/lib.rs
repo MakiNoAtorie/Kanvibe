@@ -13,6 +13,7 @@ pub mod labels;
 pub mod move_board;
 pub mod panel;
 pub mod repair;
+pub mod search;
 pub mod sidebar;
 pub mod startup;
 pub mod storage;

@@ -31,6 +31,8 @@ pub enum Input {
     Item,
     /// The Board header's filter box.
     Filter,
+    /// The Search view's box.
+    Search,
 }
 
 /// Maps a key press to the Message it stands for. iced only delivers keys the focused widget
@@ -55,6 +57,7 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         (true, Some('z')) if modifiers.shift() => return Some(Message::Redo),
         (true, Some('z')) => return Some(Message::Undo),
         (true, Some('y')) => return Some(Message::Redo),
+        (true, Some('f')) if modifiers.shift() => return Some(Message::OpenSearch),
         (true, Some('f')) => return Some(Message::FocusFilter),
         (false, Some('n')) if !typing && !modifiers.alt() => return Some(Message::NewCard),
         (false, Some('e')) if !typing && !modifiers.alt() => return Some(Message::EditDescription),
@@ -85,6 +88,13 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         match key {
             Key::Named(Named::ArrowUp) => return Some(Message::MoveEditedItem(Direction::Up)),
             Key::Named(Named::ArrowDown) => return Some(Message::MoveEditedItem(Direction::Down)),
+            _ => {}
+        }
+    }
+    if context.focused == Some(Input::Search) {
+        match key {
+            Key::Named(Named::ArrowUp) => return Some(Message::SearchMove(Direction::Up)),
+            Key::Named(Named::ArrowDown) => return Some(Message::SearchMove(Direction::Down)),
             _ => {}
         }
     }

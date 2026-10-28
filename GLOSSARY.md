@@ -51,3 +51,7 @@ _Avoid_: Quick add, composer, new card form
 **Filter**:
 Text and Labels that hide non-matching Cards on the current Board. Never saved, cleared on Board switch.
 _Avoid_: Search, query
+
+**Search**:
+A view listing Cards from every Board, active or archived, that match typed text; picking one opens its Board.
+_Avoid_: find, global filter

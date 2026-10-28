@@ -84,6 +84,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
             footer,
             // 13px with the footer's other occasional links; "+ New Board" stays full size.
             crate::chrome::link("Import Board…", Message::ImportBoard),
+            crate::chrome::tip(
+                crate::chrome::link("Search", Message::OpenSearch),
+                "Search (Ctrl+Shift+F)"
+            ),
             crate::chrome::footer(app),
         ]
         .spacing(8),

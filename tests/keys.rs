@@ -10,6 +10,7 @@ fn press(key: Key, modifiers: Modifiers) -> keyboard::Event {
             "n" => Physical::Code(Code::KeyN),
             "z" => Physical::Code(Code::KeyZ),
             "y" => Physical::Code(Code::KeyY),
+            "f" => Physical::Code(Code::KeyF),
             _ => unreachable!(),
         },
         _ => Physical::Code(Code::F24),
@@ -333,4 +334,35 @@ fn ctrl_tab_cycles_boards_even_while_typing_and_home_end_select_or_move() {
         );
         assert_eq!(keys::map(&named(key), &CAPTURE_FOCUSED), None);
     }
+}
+
+#[test]
+fn ctrl_shift_f_opens_search_and_ctrl_f_still_focuses_the_filter() {
+    for context in [NOTHING_FOCUSED, CAPTURE_FOCUSED] {
+        assert_eq!(
+            keys::map(&letter("f", Modifiers::CTRL | Modifiers::SHIFT), &context),
+            Some(Message::OpenSearch)
+        );
+        assert_eq!(
+            keys::map(&letter("f", Modifiers::CTRL), &context),
+            Some(Message::FocusFilter)
+        );
+    }
+}
+
+#[test]
+fn up_and_down_in_the_search_box_move_the_highlight() {
+    let search = Context {
+        focused: Some(Input::Search),
+        dragging: false,
+    };
+    assert_eq!(
+        keys::map(&named(Named::ArrowUp), &search),
+        Some(Message::SearchMove(Direction::Up))
+    );
+    assert_eq!(
+        keys::map(&named(Named::ArrowDown), &search),
+        Some(Message::SearchMove(Direction::Down))
+    );
+    assert_eq!(keys::map(&named(Named::ArrowLeft), &search), None);
 }
