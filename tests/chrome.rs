@@ -66,11 +66,12 @@ fn place(app: &mut App, g: Geometry, maximized: bool) {
 #[test]
 fn theme_is_light_until_toggled_and_toggles_back() {
     let mut app = App::default();
-    assert_eq!(app.theme(), Theme::Light);
+    let light = app.theme();
+    assert!(!light.extended_palette().is_dark);
     send(&mut app, [Message::ToggleTheme]);
     assert_eq!(app.theme(), Theme::Dark);
     send(&mut app, [Message::ToggleTheme]);
-    assert_eq!(app.theme(), Theme::Light);
+    assert_eq!(app.theme(), light);
 }
 
 #[test]

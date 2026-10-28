@@ -7,7 +7,7 @@ use std::time::Duration;
 use iced::widget::{column, container, row, text};
 use iced::{Element, Fill, Padding, Task, Theme};
 
-use crate::app::{App, HEADING, Message, card_face, count_badge};
+use crate::app::{App, HEADING, Message, card_face, card_style, column_style, count_badge};
 use crate::domain::Board;
 use crate::filter::Filter;
 
@@ -94,21 +94,17 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
     let columns = s.board.columns.iter().map(|col| {
         let shown = |c: &_| s.filter.matches(c, &s.board.labels);
         let count = count_badge(s.filter.count_label(col, shown), col.over_limit());
-        let header = row![text(&col.name).size(16).font(HEADING).width(Fill), count].spacing(8);
+        let header = row![text(&col.name).size(14).font(HEADING).width(Fill), count].spacing(8);
         let cards = col
             .cards
             .iter()
             .filter(|c| s.filter.matches(c, &s.board.labels));
-        let cards = cards.map(|c| {
-            card_face(Some(&s.board), c)
-                .style(container::bordered_box)
-                .into()
-        });
+        let cards = cards.map(|c| card_face(Some(&s.board), c).style(card_style).into());
         let cards = column(cards).spacing(6);
         container(column![header, cards].spacing(8))
             .width(COLUMN as f32)
             .padding(8)
-            .style(container::rounded_box)
+            .style(column_style)
             .into()
     });
     column![

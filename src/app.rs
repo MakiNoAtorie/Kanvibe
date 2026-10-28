@@ -5,8 +5,9 @@ use iced::widget::{
     button, center, column, container, operation, row, scrollable, text, text_input, tooltip,
 };
 use iced::widget::{opaque, stack};
-use iced::{Center, Element, Event, Fill, Subscription, Task, event, keyboard};
+use iced::{Border, Center, Element, Event, Fill, Padding, Shrink, Subscription, Task};
 use iced::{Theme, time, window};
+use iced::{event, keyboard};
 
 use crate::description;
 use crate::domain::{Board, Card, Column, Data, Id};
@@ -455,7 +456,11 @@ impl App {
                     column,
                     text: String::new(),
                 });
-                return operation::focus(CAPTURE_INPUT);
+                // The box is at the end of the Column's scrolling list.
+                return Task::batch([
+                    operation::focus(CAPTURE_INPUT),
+                    operation::snap_to_end(cards_widget(column)),
+                ]);
             }
             Message::CaptureChanged(text) => {
                 if let Some(capture) = &mut self.capture {
@@ -1457,8 +1462,17 @@ impl App {
         }
         columns.extend([
             gap(board.columns.len()),
-            button("+ Add Column")
-                .style(quiet)
+            // A ghost of a Column: its width, a hairline edge, muted text.
+            button(text("+ Add Column").size(13))
+                .width(COLUMN_WIDTH)
+                .padding([10, 12])
+                .style(|theme: &Theme, status| button::Style {
+                    border: Border::default()
+                        .color(theme.extended_palette().background.weak.color)
+                        .width(1)
+                        .rounded(8),
+                    ..faded(0.6)(theme, status)
+                })
                 .on_press(Message::AddColumn(board.id))
                 .into(),
         ]);
@@ -1512,9 +1526,14 @@ impl App {
         });
         // Under the ⋯ that opened it.
         let menu = menu.map(|m| container(m).align_right(Fill).into());
-        column![header]
+        // The outer gaps are drop targets too: the header is inset by one so it lines up
+        // with the first Column.
+        let top = column![header]
             .extend(menu)
             .extend(self.filter_lines(board))
+            .spacing(12)
+            .padding([0.0, drag::GAP]);
+        column![top]
             .push(
                 // Embedded scrollbars take their own lane instead of covering the content.
                 scrollable(row(columns).height(Fill))
@@ -1523,7 +1542,7 @@ impl App {
                     .height(Fill),
             )
             .spacing(12)
-            .padding(12)
+            .padding(Padding::new(6.0).top(14).bottom(12))
             .into()
     }
 
@@ -1559,7 +1578,7 @@ impl App {
         let shown = col.cards.iter().enumerate().filter(|(_, c)| self.shown(c));
         let cards = shown.map(|(i, card)| {
             let outline = outlined(
-                container::bordered_box,
+                card_style,
                 selection.is_some_and(|s| s.card == Some(card.id)),
             );
             // The Card being dragged stays in place, its text faded under the ghost.
@@ -1590,6 +1609,24 @@ impl App {
             drag::target(drag::source(slot, Item::Card(card.id)), target, dragging).into()
         });
         let cards = cards.chain([drag::indicator(gap == Some(col.cards.len()))]);
+        // An empty Column says what it takes.
+        let hint = col.cards.is_empty().then(|| {
+            container(
+                column![
+                    text("Drop a Card here").size(13),
+                    text("or press N").size(13)
+                ]
+                .spacing(2)
+                .align_x(Center),
+            )
+            .center_x(Fill)
+            .padding([20, 12])
+            .style(|theme: &Theme| container::Style {
+                text_color: Some(theme.palette().text.scale_alpha(0.45)),
+                ..container::Style::default()
+            })
+            .into()
+        });
         let footer: Element<_> = match &self.capture {
             Some(capture) if capture.column == col.id => {
                 text_input("Card title (Enter adds, Esc cancels)", &capture.text)
@@ -1601,7 +1638,7 @@ impl App {
             }
             _ => crate::chrome::tip(
                 button("+ Add Card")
-                    .style(button::text)
+                    .style(faded(0.6))
                     .on_press(Message::OpenCapture(col.id)),
                 "Add Card (N)",
             ),
@@ -1614,11 +1651,11 @@ impl App {
         // Dragged by the header only; the name label forwards the press (it captures its own).
         let item = Item::Column(col.id);
         let header = row![
-            self.name_widget(Field::ColumnName(col.id), &col.name, 16, Some(item)),
+            self.name_widget(Field::ColumnName(col.id), &col.name, 14, Some(item)),
             count,
             crate::chrome::tip(
                 button("⋯")
-                    .style(button::text)
+                    .style(faded(0.5))
                     .on_press(Message::ToggleColumnMenu(col.id)),
                 "Column menu"
             ),
@@ -1668,23 +1705,25 @@ impl App {
             ),
             _ => None,
         };
+        // The Column shrinks to its Cards, so "+ Add Card" scrolls with them: a footer below
+        // the list would be squeezed out once the list fills the height (layout is in order).
+        let footer = container(footer).padding(Padding::ZERO.top(4));
         let column_box = container(
             column![header]
                 .extend(menu)
                 .push(
-                    scrollable(column(cards))
+                    scrollable(column(cards).extend(hint).push(footer))
                         .id(cards_widget(col.id))
                         .direction(widget::scrollable::Direction::Vertical(scrollbar(6)))
                         .height(Fill),
                 )
-                .push(footer)
                 .spacing(8),
         )
         .id(column_widget(col.id))
-        .width(280)
-        .height(Fill)
+        .width(COLUMN_WIDTH)
+        .height(Shrink) // not the Fill it would take from the Cards' scrollable
         .padding(8)
-        .style(outlined(container::rounded_box, selection.is_some()));
+        .style(outlined(column_style, selection.is_some()));
         // Cards and buttons capture their clicks, so this only fires on the Column's empty area.
         let area = mouse_area(column_box).on_press(Message::Select(Selection {
             column: col.id,
@@ -1743,23 +1782,27 @@ pub(crate) fn card_face<'a>(
         ),
     )
     .width(Fill)
-    .padding(8)
+    .padding([9, 11])
 }
 
-/// A Column's count; over its limit, a danger-coloured pill that reads in both themes.
+/// A Column's count as a small grey pill; over its limit, a danger-coloured one.
 /// Shared by the Board view and the image export.
 pub(crate) fn count_badge<'a>(label: String, over: bool) -> Element<'a, Message> {
-    if !over {
-        return text(label).into();
-    }
-    container(text(label))
-        .padding([0, 6])
-        .style(|theme: &Theme| {
-            let pair = theme.extended_palette().danger.base;
+    container(text(label).size(12))
+        .padding([1, 7])
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            let (background, text) = match over {
+                true => (palette.danger.base.color, palette.danger.base.text),
+                false => (
+                    palette.background.weaker.color,
+                    palette.background.weaker.text.scale_alpha(0.75),
+                ),
+            };
             container::Style {
-                background: Some(pair.color.into()),
-                text_color: Some(pair.text),
-                border: iced::Border::default().rounded(8),
+                background: Some(background.into()),
+                text_color: Some(text),
+                border: Border::default().rounded(10),
                 ..container::Style::default()
             }
         })
@@ -1896,23 +1939,24 @@ fn scrollbar(width: u32) -> widget::scrollable::Scrollbar {
         .spacing(4)
 }
 
-/// The secondary button: weakest background, 1px strong border, weak background on hover.
+/// The secondary button: raised (weakest) background, 1px weak border, weaker background on
+/// hover.
 pub(crate) fn quiet(theme: &Theme, status: button::Status) -> button::Style {
     let palette = theme.extended_palette();
     let base = button::Style {
         background: Some(palette.background.weakest.color.into()),
         text_color: palette.background.weakest.text,
-        border: iced::Border {
-            color: palette.background.strong.color,
+        border: Border {
+            color: palette.background.weak.color,
             width: 1.0,
-            radius: 4.0.into(),
+            radius: 6.0.into(),
         },
         ..button::Style::default()
     };
     match status {
         button::Status::Active => base,
         button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(palette.background.weak.color.into()),
+            background: Some(palette.background.weaker.color.into()),
             ..base
         },
         // As iced's own disabled buttons: everything at half strength.
@@ -1921,9 +1965,52 @@ pub(crate) fn quiet(theme: &Theme, status: button::Status) -> button::Style {
             text_color: base.text_color.scale_alpha(0.5),
             border: base
                 .border
-                .color(palette.background.strong.color.scale_alpha(0.5)),
+                .color(palette.background.weak.color.scale_alpha(0.5)),
             ..base
         },
+    }
+}
+
+/// A text button whose text is at `alpha` until hovered: occasional links and "+ Add Card".
+pub(crate) fn faded(alpha: f32) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let style = button::text(theme, status);
+        match status {
+            button::Status::Active => button::Style {
+                text_color: style.text_color.scale_alpha(alpha),
+                ..style
+            },
+            _ => style,
+        }
+    }
+}
+
+/// A Column: the raised surface, rounded, on a soft shadow (the image export's too).
+pub(crate) fn column_style(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
+    container::Style {
+        background: Some(palette.background.weakest.color.into()),
+        text_color: Some(palette.background.weakest.text),
+        border: Border::default().rounded(12),
+        shadow: iced::Shadow {
+            color: iced::Color::BLACK.scale_alpha(0.08),
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 10.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+/// A Card: a ticket tinted from the raised surface toward the text, with a hairline edge
+/// (the image export's too).
+pub(crate) fn card_style(theme: &Theme) -> container::Style {
+    let bg = theme.extended_palette().background;
+    let fill = iced::theme::palette::mix(bg.weakest.color, bg.weaker.color, 0.45);
+    container::Style {
+        background: Some(fill.into()),
+        text_color: Some(bg.weakest.text),
+        border: Border::default().color(bg.weaker.color).width(1).rounded(6),
+        ..container::Style::default()
     }
 }
 
@@ -1945,6 +2032,8 @@ fn outlined(
 }
 
 const BOARD_SCROLL: &str = "board";
+/// A Column's width (the "+ Add Column" ghost's too).
+pub(crate) const COLUMN_WIDTH: f32 = 280.0;
 /// Board and Column names (the image export's too).
 pub(crate) const HEADING: iced::Font = iced::Font {
     weight: iced::font::Weight::Semibold,

@@ -2,7 +2,7 @@
 use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text};
 use iced::{Border, Center, Color, Element, Fill, Padding, Theme};
 
-use crate::app::{App, Message, board_name_input, clipped, clipped_text};
+use crate::app::{App, HEADING, Message, board_name_input, clipped};
 use crate::domain::{Board, Id};
 use crate::drag::{self, Drag, Item, Target};
 
@@ -20,7 +20,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .width(RAIL)
             .height(Fill)
             .padding(4)
-            .style(container::bordered_box)
+            .style(style)
             .into();
     }
     let (archived, active): (Vec<&Board>, Vec<&Board>) =
@@ -83,9 +83,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             scrollable(list.spacing(12)).height(Fill),
             footer,
             // 13px with the footer's other occasional links; "+ New Board" stays full size.
-            button(text("Import Board…").size(13))
-                .style(button::text)
-                .on_press(Message::ImportBoard),
+            crate::chrome::link("Import Board…", Message::ImportBoard),
             crate::chrome::footer(app),
         ]
         .spacing(8),
@@ -93,8 +91,18 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .width(WIDTH)
     .height(Fill)
     .padding(8)
-    .style(container::bordered_box)
+    .style(style)
     .into()
+}
+
+/// Between the page and the raised surface, with a hairline edge.
+fn style(theme: &Theme) -> container::Style {
+    let bg = theme.extended_palette().background;
+    container::Style {
+        background: Some(iced::theme::palette::mix(bg.base.color, bg.weakest.color, 0.5).into()),
+        border: Border::default().color(bg.weaker.color).width(1),
+        ..container::Style::default()
+    }
 }
 
 /// A drop gap before the active Board at `i`, holding `content` below its indicator.
@@ -114,23 +122,29 @@ fn gap<'a>(
 /// An active Board's row: its name, highlighted when current; a click opens it.
 /// Kept small so drag and drop can wrap it as a drop target.
 pub fn board_row(board: &Board, current: bool) -> Element<'_, Message> {
-    // The current Board is marked with the weak primary shade, not a solid fill that would
-    // outshine the Board itself.
+    // The current Board is a grey pill with a semibold name: no accent colour at rest.
     let style = move |theme: &Theme, status| match current {
         true => {
-            let pair = theme.extended_palette().primary.weak;
+            let pair = theme.extended_palette().background.weaker;
             button::Style {
                 background: Some(pair.color.into()),
                 text_color: pair.text,
-                border: Border::default().rounded(4),
+                border: Border::default().rounded(6),
                 ..button::Style::default()
             }
         }
         false => button::text(theme, status),
     };
+    let name = board.name.as_str();
+    let font = if current {
+        HEADING
+    } else {
+        iced::Font::DEFAULT
+    };
+    let label = text(name).font(font).wrapping(text::Wrapping::None);
     // No `on_press`: the button must not capture the press the drag source needs. A press
     // released under the drag threshold opens the Board (see `Message::DragEnd`).
-    let row = button(clipped_text(board.name.as_str()).width(Fill))
+    let row = button(clipped(label, text(name)).width(Fill))
         .style(move |theme, status| match status {
             button::Status::Disabled => style(theme, button::Status::Active),
             status => style(theme, status),

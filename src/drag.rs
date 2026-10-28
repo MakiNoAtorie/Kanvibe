@@ -165,14 +165,17 @@ pub fn indicator<'a>(active: bool) -> Element<'a, Message> {
         .into()
 }
 
-/// The 2px vertical drop indicator, centred in a 12px-wide gap between Columns.
+/// The width of the gaps between Columns (and at both ends), which hold [`indicator_v`].
+pub const GAP: f32 = 14.0;
+
+/// The 2px vertical drop indicator, centred in a [`GAP`]-wide gap between Columns.
 pub fn indicator_v<'a>(active: bool) -> Element<'a, Message> {
     let line =
         container(space().width(2).height(Fill)).style(move |theme: &Theme| container::Style {
             background: active.then(|| theme.palette().primary.into()),
             ..Default::default()
         });
-    container(line).width(12).height(Fill).center_x(12).into()
+    container(line).width(GAP).height(Fill).center_x(GAP).into()
 }
 
 /// The floating copy of the dragged item under the cursor; it sets no mouse interaction,

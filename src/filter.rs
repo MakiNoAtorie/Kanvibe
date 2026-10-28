@@ -141,6 +141,7 @@ impl App {
             text_input("Filter (Ctrl+F)", &self.filter.text)
                 .id(INPUT)
                 .width(width)
+                .style(raised_input)
                 .on_input(Message::FilterChanged)
                 .on_submit(Message::SubmitFilter),
             "Filter (Ctrl+F)"
@@ -216,5 +217,20 @@ impl App {
             .matches(card, self.board().map_or(&[], |b| &b.labels))
             || self.selection.and_then(|s| s.card) == Some(card.id)
             || self.filter_kept.contains(&card.id)
+    }
+}
+
+/// The filter box on the raised surface (as the header's buttons), with their weak edge.
+fn raised_input(theme: &iced::Theme, status: text_input::Status) -> text_input::Style {
+    let bg = theme.extended_palette().background;
+    let style = text_input::default(theme, status);
+    let border = match status {
+        text_input::Status::Active => style.border.color(bg.weak.color),
+        _ => style.border,
+    };
+    text_input::Style {
+        background: bg.weakest.color.into(),
+        border: border.rounded(6),
+        ..style
     }
 }

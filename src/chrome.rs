@@ -1,9 +1,11 @@
 //! Window chrome (#23): theme, window geometry, the shortcuts overlay and the data-folder opener.
 use std::path::Path;
 use std::process::Command;
+use std::sync::LazyLock;
 
+use iced::theme::{Palette, palette};
 use iced::widget::{button, column, row, text, tooltip};
-use iced::{Element, Point, Size, Task, Theme, window};
+use iced::{Color, Element, Point, Size, Task, Theme, color, window};
 
 use crate::app::{App, Message, dialog};
 use crate::storage::Geometry;
@@ -134,6 +136,28 @@ pub fn logical(x: i32, y: i32, width: u32, height: u32, scale: f32) -> Geometry 
     }
 }
 
+/// The light theme: paper greys on a warm `#f7f7f5` page. Surfaces read from the background
+/// tiers in both themes: `weakest` is the raised surface (Columns, buttons, the Card panel),
+/// which is white here; iced's dark theme already lifts it toward the text. The other tiers
+/// come from a neutral page: iced's darkening multiplies a warm page's chroma into olive.
+static LIGHT: LazyLock<Theme> = LazyLock::new(|| {
+    let paper = Palette {
+        background: color!(0xf7f7f5),
+        text: color!(0x222222),
+        ..Palette::LIGHT
+    };
+    Theme::custom_with_fn("Kanvibe Light", paper, |p| {
+        let neutral = Palette {
+            background: color!(0xf7f7f7),
+            ..p
+        };
+        let mut extended = palette::Extended::generate(neutral);
+        extended.background.base = palette::Pair::new(p.background, p.text);
+        extended.background.weakest = palette::Pair::new(Color::WHITE, p.text);
+        extended
+    })
+});
+
 /// The connected monitors; empty if the system won't say (then nothing is dropped as off-screen).
 pub fn monitors() -> Vec<Geometry> {
     display_info::DisplayInfo::all()
@@ -146,7 +170,11 @@ pub fn monitors() -> Vec<Geometry> {
 impl App {
     /// The light or dark iced theme.
     pub fn theme(&self) -> Theme {
-        if self.dark { Theme::Dark } else { Theme::Light }
+        if self.dark {
+            Theme::Dark
+        } else {
+            LIGHT.clone()
+        }
     }
 
     /// The description highlighter's theme, following the app theme.
@@ -230,11 +258,6 @@ pub fn tip<'a>(
 
 /// The sidebar footer's last three buttons: theme, Keyboard shortcuts, Open data folder.
 pub fn footer(app: &App) -> Element<'_, Message> {
-    let link = |label, message| {
-        button(text(label).size(13))
-            .style(button::text)
-            .on_press(message)
-    };
     let (theme, switch) = if app.dark {
         ("Light theme", "Switch to the light theme")
     } else {
@@ -252,6 +275,13 @@ pub fn footer(app: &App) -> Element<'_, Message> {
         ),
     ]
     .into()
+}
+
+/// A sidebar footer link: 13px, muted until hovered.
+pub fn link(label: &str, message: Message) -> button::Button<'_, Message> {
+    button(text(label).size(13))
+        .style(crate::app::faded(0.7))
+        .on_press(message)
 }
 
 /// The file manager command that shows `dir`.
