@@ -1600,16 +1600,24 @@ impl App {
                 .into(),
             ),
             _ if self.column_menu == Some(col.id) => Some(
+                // Full-width 14px items, so the menu reads as one block and Remove fits one line.
                 column![
-                    button("Rename")
+                    button(text("Rename").size(14))
                         .style(quiet)
+                        .width(Fill)
                         .on_press(Message::StartEdit(Field::ColumnName(col.id))),
-                    button("Set limit…")
+                    button(text("Set limit…").size(14))
                         .style(quiet)
+                        .width(Fill)
                         .on_press(Message::OpenLimit(col.id)),
-                    button(text(crate::archive::remove_column_text(col)))
-                        .style(quiet)
-                        .on_press(Message::RemoveColumn(col.id)),
+                    button(
+                        text(crate::archive::remove_column_text(col))
+                            .size(14)
+                            .style(text::danger),
+                    )
+                    .style(quiet)
+                    .width(Fill)
+                    .on_press(Message::RemoveColumn(col.id)),
                 ]
                 .spacing(4)
                 .into(),
