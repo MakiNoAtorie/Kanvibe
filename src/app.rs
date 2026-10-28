@@ -20,6 +20,7 @@ use iced::Point;
 use iced::widget::text_editor;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub(crate) const BOARD_NAME_INPUT: &str = "board-name";
@@ -54,8 +55,9 @@ pub struct App {
     pub limit_input: Option<LimitInput>,
     /// The selected Column and, optionally, a Card in it; both outlined.
     pub selection: Option<Selection>,
-    /// The state the background writer is saving; `Some` while a save is in flight.
-    pub writing: Option<(Data, Settings)>,
+    /// The state the background writer is saving; `Some` while a save is in flight. Shared
+    /// with the `SaveJob`, so a save copies the Boards once.
+    pub writing: Option<Arc<(Data, Settings)>>,
     /// The state whose save failed. Not retried until something changes or `RetrySave`.
     pub failed: Option<(Data, Settings)>,
     /// The persistent bar: "Not saved: <path>: <OS error>". Cleared by a successful save.
@@ -142,15 +144,23 @@ pub enum Closing {
 #[derive(Debug)]
 pub struct SaveJob {
     dir: PathBuf,
-    data: Data,
-    settings: Settings,
+    state: Arc<(Data, Settings)>,
+    /// `App.rotation` when the job was made; `run` rotates and hands the new value back.
+    rotation: storage::Rotation,
+    /// The save changes Board data (see `storage::rotate`).
+    data_changed: bool,
 }
 
 impl SaveJob {
-    /// Writes the data file, blocking. The one place the app performs a save.
-    pub fn run(self) -> Message {
-        let saved = storage::save(&self.dir, &self.data, &self.settings);
-        Message::Saved(saved.map_err(|e| not_saved(&storage::file_path(&self.dir), e)))
+    /// Rotates the backups if due, then writes the data file, blocking. The one place the app
+    /// performs a save; off the UI thread, since rotating reads, copies and parses the file.
+    pub fn run(mut self) -> Message {
+        if let Err(e) = storage::rotate(&self.dir, &mut self.rotation, self.data_changed) {
+            eprintln!("Backups not rotated: {e}");
+        }
+        let saved = storage::save(&self.dir, &self.state.0, &self.state.1);
+        let saved = saved.map_err(|e| not_saved(&storage::file_path(&self.dir), e));
+        Message::Saved(saved, self.rotation)
     }
 }
 
@@ -244,8 +254,9 @@ pub enum Message {
     OpenLimit(Id),
     LimitChanged(String),
     SubmitLimit,
-    /// The background writer finished; `Err` holds the "Not saved" bar text.
-    Saved(Result<(), String>),
+    /// The background writer finished; `Err` holds the "Not saved" bar text. Also the backup
+    /// rotation state after the job's rotation.
+    Saved(Result<(), String>, storage::Rotation),
     /// The 10 s timer while not saved, or Retry in the close dialog: try the failed save again.
     RetrySave,
     /// "Save a copy as…" in the close dialog: the native Save dialog, then the copy is written.
@@ -653,14 +664,11 @@ impl App {
                 }
                 self.drag = None;
                 let step = match message {
-                    Message::Undo => self.history.undo(),
-                    _ => self.history.redo(),
+                    Message::Undo => self.history.undo(&mut self.data.boards),
+                    _ => self.history.redo(&mut self.data.boards),
                 };
-                if let Some((boards, show)) = step {
-                    self.data.boards = boards;
-                    if show.is_some() {
-                        self.current_board = show;
-                    }
+                if let Some(Some(show)) = step {
+                    self.current_board = Some(show);
                 }
             }
             Message::Key(event) => {
@@ -755,8 +763,11 @@ impl App {
                 self.closing = Closing::Waiting;
                 return self.exit_if_saved();
             }
-            Message::Saved(result) => {
-                let attempted = self.writing.take();
+            Message::Saved(result, rotation) => {
+                self.rotation = rotation;
+                // The job has dropped its share by now, so this moves rather than copies.
+                let attempted = (self.writing.take())
+                    .map(|s| Arc::try_unwrap(s).unwrap_or_else(|s| (*s).clone()));
                 match result {
                     Ok(()) => {
                         self.saved = attempted.unwrap_or_default();
@@ -2062,37 +2073,40 @@ impl App {
     /// `None` while a save is in flight: its `Saved` result runs this again, so changes made
     /// meanwhile merge into one save of the latest state.
     pub fn save_if_changed(&mut self) -> Option<SaveJob> {
-        let dir = self.data_dir.clone()?;
+        let dir = self.data_dir.as_ref()?;
         if self.writing.is_some() || self.editing.as_ref().is_some_and(|e| e.typed_at.is_some()) {
             return None; // live text waits for the idle write (`EditTick`)
         }
-        let state = (self.data.clone(), self.settings());
-        if self.same(&state, &self.saved) {
+        // Compared in place: this runs after every message (drag moves, ticks, resizes), so the
+        // state is cloned only once a save is going to happen.
+        let settings = self.settings();
+        let now = (&self.data, &settings);
+        if self.same(now, (&self.saved.0, &self.saved.1)) {
             self.not_saved = None; // e.g. undone back to what the file holds
             return None;
         }
-        if self.failed.as_ref().is_some_and(|f| self.same(f, &state)) {
+        if (self.failed.as_ref()).is_some_and(|(d, s)| self.same((d, s), now)) {
             return None; // wait for a change or the retry timer
         }
-        // ponytail: rotation runs here on the UI thread (a file copy, at most once per session or
-        // per 24 h, never while a write is in flight); move it into `SaveJob::run` if it ever stalls.
-        let changed = self.saved.0 != state.0;
-        if let Err(e) = storage::rotate(&dir, &mut self.rotation, changed) {
-            eprintln!("Backups not rotated: {e}");
-        }
-        self.writing = Some(state.clone());
-        let (data, settings) = state;
+        // Only a due rotation looks at whether Board data changed.
+        let data_changed = self.rotation == storage::Rotation::Due && self.saved.0 != self.data;
+        let state = Arc::new((self.data.clone(), settings));
+        self.writing = Some(Arc::clone(&state));
         Some(SaveJob {
-            dir,
-            data,
-            settings,
+            dir: dir.clone(),
+            state,
+            rotation: self.rotation,
+            data_changed,
         })
     }
 
     /// Exits once a requested close has nothing left to save and no save in flight;
     /// otherwise the next `save_if_changed` starts the save and its `Saved` comes back here.
     fn exit_if_saved(&mut self) -> Task<Message> {
-        let clean = self.same(&self.saved, &(self.data.clone(), self.settings()));
+        let clean = self.same(
+            (&self.saved.0, &self.saved.1),
+            (&self.data, &self.settings()),
+        );
         if self.closing != Closing::Waiting || self.writing.is_some() || !clean {
             return Task::none();
         }
@@ -2102,7 +2116,7 @@ impl App {
 
     /// Whether two saved states match. The window is ignored (geometry never triggers a save on
     /// its own) except while closing, when it is saved too.
-    fn same(&self, a: &(Data, Settings), b: &(Data, Settings)) -> bool {
+    fn same(&self, a: (&Data, &Settings), b: (&Data, &Settings)) -> bool {
         if self.closing != Closing::No {
             return a == b;
         }
@@ -2111,7 +2125,7 @@ impl App {
             maximized: false,
             ..s.clone()
         };
-        a.0 == b.0 && bare(&a.1) == bare(&b.1)
+        a.0 == b.0 && bare(a.1) == bare(b.1)
     }
 
     /// The settings saved beside the Boards.
