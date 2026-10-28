@@ -503,6 +503,7 @@ impl App {
             }
             Message::OpenCapture(column) => {
                 self.commit_pending();
+                self.expand(column); // a strip has no room for the box
                 self.open = false; // new Cards become selected; they shouldn't open one by one
                 self.capture = Some(Capture::new(column));
                 return focus_capture(column);
@@ -874,11 +875,12 @@ impl App {
             }
             Message::CommitEdit => _ = self.commit_pending(),
             Message::DueChanged(card, text) => {
-                let task = match self.editing.as_ref().map(|e| e.field) {
-                    Some(Field::Due(c)) if c == card => Task::none(),
-                    _ => self.update(Message::StartEdit(Field::Due(card))),
-                };
-                return Task::batch([task, self.update(Message::EditChanged(text))]);
+                if self.editing.as_ref().map(|e| e.field) != Some(Field::Due(card)) {
+                    // Drop StartEdit's focus task: refocusing the typed-in box moves its cursor
+                    // to the end.
+                    let _ = self.update(Message::StartEdit(Field::Due(card)));
+                }
+                return self.update(Message::EditChanged(text));
             }
             Message::EditTick(now) => {
                 if let Some(edit) = &mut self.editing
@@ -1208,6 +1210,14 @@ impl App {
         self.history.record(&self.data.boards, board, board)
     }
 
+    /// Expands `column` if it is collapsed, as an undo step on its Board.
+    pub(crate) fn expand(&mut self, column: Id) {
+        if self.data.column(column).is_some_and(|c| c.collapsed) {
+            self.data.toggle_collapse(column);
+            self.record_step(self.data.board_of_column(column));
+        }
+    }
+
     /// A text box with state is open: the Board name prompt, Capture box, pending edit or limit.
     pub(crate) fn field_open(&self) -> bool {
         self.board_name.is_some()
@@ -1373,6 +1383,7 @@ impl App {
     /// After any Board switch: each Board opens clean.
     fn left_board(&mut self) {
         self.selection = None;
+        self.open = false;
         self.capture = None;
         self.column_menu = None;
         self.limit_input = None;
@@ -1384,7 +1395,7 @@ impl App {
     }
 
     /// Runs at the end of every `update`: the Selection is cleared when its Card is no longer an
-    /// active Card on the current Board, and the open Card closes when the Selection has no Card.
+    /// active Card on the current Board, and open mode ends when there is no Selection at all.
     /// The current Board is never archived or gone: it falls back to the next active Board
     /// below, else above (positions from `order`, the Board IDs before the update).
     fn validate_ui(&mut self, board: Option<Id>, order: &[Id]) {
@@ -1405,7 +1416,7 @@ impl App {
         self.validate_labels();
         self.validate_filter();
         self.validate_move();
-        self.open &= self.selection.is_some_and(|s| s.card.is_some());
+        self.open &= self.selection.is_some(); // a Column-only Selection keeps open mode
     }
 
     /// The Card is an active Card of the current Board.

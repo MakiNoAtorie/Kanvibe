@@ -167,6 +167,26 @@ fn picking_a_hit_on_another_board_opens_it_on_that_card() {
 }
 
 #[test]
+fn picking_a_hit_in_a_collapsed_column_expands_it_as_one_undo_step() {
+    let mut app = app();
+    let groceries = card(&app, "Groceries");
+    let done = app.data.boards[1].columns[2].id;
+    app.data.toggle_collapse(done);
+    send(
+        &mut app,
+        [
+            Message::OpenSearch,
+            Message::SearchChanged("groc".into()),
+            Message::SearchPick(groceries),
+        ],
+    );
+    assert!(!app.data.boards[1].columns[2].collapsed);
+    assert_eq!(app.open_card(), Some(groceries));
+    send(&mut app, [Message::Undo]);
+    assert!(app.data.boards[1].columns[2].collapsed);
+}
+
+#[test]
 fn picking_an_archived_card_opens_its_boards_archive_view() {
     let mut app = app();
     let home = app.data.boards[1].id;

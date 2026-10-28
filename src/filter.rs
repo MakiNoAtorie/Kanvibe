@@ -80,6 +80,7 @@ impl App {
             Message::FocusFilter => return operation::focus(INPUT),
             Message::SubmitFilter => {
                 let board = self.board().into_iter().flat_map(|b| &b.columns);
+                let board = board.filter(|c| !c.collapsed); // a strip shows no Card
                 let mut cards = board.flat_map(|c| c.cards.iter().map(move |x| (c.id, x)));
                 if let Some((column, card)) = cards.find(|(_, card)| self.shown(card)) {
                     let card = Some(card.id);

@@ -219,12 +219,11 @@ fn the_open_card_follows_arrow_keys_and_clicks() {
 }
 
 #[test]
-fn clicking_empty_board_space_keeps_it_open_but_selecting_a_column_closes_it() {
+fn clicking_a_column_body_keeps_open_mode_for_the_next_card() {
     let mut app = app_with_cards();
     click(&mut app, "A");
     send(&mut app, [Message::ClickOutside]);
     assert_eq!(app.open_card(), Some(card(&app, "A")));
-
     let doing = app.data.boards[0].columns[1].id;
     send(
         &mut app,
@@ -233,9 +232,21 @@ fn clicking_empty_board_space_keeps_it_open_but_selecting_a_column_closes_it() {
             card: None,
         })],
     );
-    assert!(!app.open, "the open Card is always the selected Card");
+    assert!(app.open, "a click on a Column body leaves open mode on");
+    assert_eq!(app.open_card(), None, "no Card is selected to show");
     send(&mut app, [Message::MoveSelection(Direction::Left)]);
-    assert!(!app.open, "and it stays closed on the next Card");
+    assert!(app.open);
+    assert!(app.open_card().is_some(), "the next Card shows open again");
+}
+
+#[test]
+fn arrows_across_an_empty_column_keep_the_next_card_open() {
+    let mut app = app_with_cards();
+    click(&mut app, "A");
+    send(&mut app, [Message::MoveSelection(Direction::Right)]);
+    assert_eq!(app.open_card(), None, "Doing is empty");
+    send(&mut app, [Message::MoveSelection(Direction::Right)]);
+    assert_eq!(app.open_card(), Some(card(&app, "D")));
 }
 
 #[test]

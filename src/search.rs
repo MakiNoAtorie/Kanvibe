@@ -112,6 +112,7 @@ impl App {
         match column {
             Some(column) => {
                 self.archive = None;
+                self.expand(column); // a Card in a strip can't show open
                 let card = Some(card);
                 let reveal = self.update(Message::Select(Selection { column, card }));
                 Task::batch([reveal, self.update(Message::OpenCard)])

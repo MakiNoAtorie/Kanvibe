@@ -147,6 +147,20 @@ fn ctrl_right_into_a_collapsed_column_appends_below_cards_the_filter_hides() {
 }
 
 #[test]
+fn new_card_on_a_collapsed_column_expands_it_and_opens_the_capture_box() {
+    let mut app = app_with_doing_collapsed();
+    select(&mut app, 1, None);
+    send(&mut app, [Message::NewCard]);
+    assert!(!collapsed(&app, 1));
+    assert_eq!(
+        app.capture.as_ref().map(|c| c.column),
+        Some(column_id(&app, 1))
+    );
+    send(&mut app, [Message::Escape, Message::Undo]);
+    assert!(collapsed(&app, 1), "the expand is its own undo step");
+}
+
+#[test]
 fn collapse_and_expand_are_one_undo_step_each() {
     let mut app = app_with_cards();
     let doing = column_id(&app, 1);

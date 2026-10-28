@@ -340,6 +340,18 @@ fn enter_in_the_filter_box_selects_the_first_visible_card() {
 }
 
 #[test]
+fn enter_in_the_filter_box_skips_collapsed_columns() {
+    let mut app = app_with(&[&["x"], &["y", "bug 2"], &["bug 3"]]);
+    let doing = column(&app, 1);
+    send(&mut app, [Message::ToggleCollapse(doing)]);
+    send(
+        &mut app,
+        [Message::FilterChanged("bug".into()), Message::SubmitFilter],
+    );
+    assert_eq!(selected(&app), Some("bug 3"));
+}
+
+#[test]
 fn esc_closes_the_open_card_then_clears_the_filter_then_the_selection() {
     let mut app = app_with(&[&["bug 1", "x"]]);
     send(&mut app, [Message::FilterChanged("bug".into())]);
