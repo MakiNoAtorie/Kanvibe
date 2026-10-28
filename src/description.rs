@@ -73,6 +73,20 @@ pub(crate) fn face_icon<'a>(card: &Card) -> Option<Element<'a, Message>> {
     (!card.description.is_empty()).then(|| text("≡").style(text::secondary).into())
 }
 
+/// iced's Markdown style with inline code on the weak background in the theme's text colour,
+/// instead of a black box (loud in the light theme).
+fn markdown_settings(theme: &iced::Theme) -> markdown::Settings {
+    let palette = theme.extended_palette();
+    markdown::Settings::with_style(markdown::Style {
+        inline_code_highlight: markdown::Highlight {
+            background: palette.background.weak.color.into(),
+            border: iced::Border::default().rounded(4),
+        },
+        inline_code_color: palette.background.weak.text,
+        ..markdown::Style::from_palette(theme.palette())
+    })
+}
+
 impl App {
     /// Re-parses the open Card's description for the rendered view when it changed.
     /// Runs after every `update`.
@@ -120,7 +134,8 @@ impl App {
         );
         let body: Element<_> = match card.description.is_empty() {
             true => text("No description").style(text::secondary).into(),
-            false => markdown::view(self.rendered.1.items(), &theme).map(Message::OpenLink),
+            false => markdown::view(self.rendered.1.items(), markdown_settings(&theme))
+                .map(Message::OpenLink),
         };
         column![header(edit), body].spacing(6).into()
     }
