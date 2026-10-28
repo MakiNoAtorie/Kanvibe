@@ -285,6 +285,16 @@ fn f1_opens_the_shortcuts_overlay_and_esc_closes_it() {
 }
 
 #[test]
+fn the_shortcuts_overlay_closes_with_its_close_button() {
+    let mut app = App::default();
+    send(&mut app, [Message::ShowShortcuts]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("Esc closes this").is_err());
+    let _ = ui.click("✕");
+    assert!(ui.into_messages().any(|m| m == Message::Escape));
+}
+
+#[test]
 fn shortcuts_list_names_every_key_the_map_knows() {
     let all: String = chrome::SHORTCUTS
         .iter()

@@ -185,11 +185,15 @@ impl App {
             .spacing(12)
             .into()
         });
+        // The same ✕ (Esc) header as the other dialogs; a fixed width holds the right-aligned ✕.
         dialog(
-            column![text("Keyboard shortcuts").size(20)]
-                .extend(rows)
-                .push(text("Esc closes this").size(12))
-                .spacing(8),
+            column![crate::app::dialog_header(
+                "Keyboard shortcuts",
+                Message::Escape
+            )]
+            .extend(rows)
+            .spacing(8)
+            .width(600),
         )
     }
 }
