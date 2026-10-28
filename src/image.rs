@@ -5,11 +5,12 @@ use std::fs;
 use std::time::Duration;
 
 use iced::widget::{column, container, row, text};
-use iced::{Center, Element, Fill, Padding, Task, Theme};
+use iced::{Element, Fill, Padding, Task, Theme};
 
 use crate::app::{
     App, BOARD_TITLE_SIZE, CARD_GAP, CARD_TITLE_SIZE, COLUMN_GAP, COLUMN_NAME_SIZE, COLUMN_WIDTH,
-    HEADING, Message, aged, card_face, card_style, column_style, count_badge,
+    HEADING, Message, STALE_ALPHA, card_face, card_style, column_style, count_badge, fade_text,
+    strip_face,
 };
 use crate::domain::Board;
 use crate::filter::Filter;
@@ -111,24 +112,12 @@ pub fn render(board: &Board, filter: &Filter, theme: &Theme) -> Result<Vec<u8>, 
 /// Bottom padding is left off (the crop adds it back), so an overflow reaches the last row.
 fn view(s: &Snapshot) -> Element<'_, Message> {
     let now = jiff::Timestamp::now();
+    let today = crate::due::today(now);
     let columns = s.board.columns.iter().map(|col| {
         let shown = |c: &_| s.filter.matches(c, &s.board.labels);
         let count = count_badge(s.filter.count_label(col, shown), col.over_limit());
         if col.collapsed {
-            // The Board's strip: count over the clipped name.
-            let name = text(&col.name)
-                .size(COLUMN_NAME_SIZE)
-                .font(HEADING)
-                .style(text::secondary);
-            let name = container(name.wrapping(text::Wrapping::None))
-                .width(Fill)
-                .clip(true);
-            return container(column![count, name].spacing(8).align_x(Center))
-                .width(STRIP as f32)
-                .padding([8, 4])
-                .clip(true)
-                .style(column_style)
-                .into();
+            return strip_face(col, count).style(column_style).into();
         }
         let name = text(&col.name)
             .size(COLUMN_NAME_SIZE)
@@ -145,8 +134,9 @@ fn view(s: &Snapshot) -> Element<'_, Message> {
                 Some(&s.board),
                 c,
                 text(&c.title).size(CARD_TITLE_SIZE).width(Fill).into(),
+                today,
             )
-            .style(move |theme| aged(card_style(theme), stale))
+            .style(move |theme| fade_text(card_style(theme), if stale { STALE_ALPHA } else { 1.0 }))
             .into()
         });
         let cards = column(cards).spacing(CARD_GAP);

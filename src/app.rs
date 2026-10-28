@@ -1043,7 +1043,7 @@ impl App {
             Message::ShowShortcuts => self.shortcuts = true,
             Message::OpenDataFolder => {
                 if let Some(dir) = &self.data_dir {
-                    crate::chrome::open_folder(dir);
+                    crate::chrome::open_path(dir);
                 }
             }
             Message::Maximized(maximized) => self.window.set_maximized(maximized),
@@ -1645,9 +1645,10 @@ impl App {
             drag::target(mouse_area(line), Target::ColumnGap(i), dragged).into()
         };
         let mut columns: Vec<Element<_>> = Vec::new();
-        let now = jiff::Timestamp::now(); // ageing: one clock read per view
+        let now = jiff::Timestamp::now(); // ageing and due badges: one clock read per view
+        let today = crate::due::today(now);
         for (i, c) in board.columns.iter().enumerate() {
-            columns.extend([gap(i), self.view_column(c, now)]);
+            columns.extend([gap(i), self.view_column(c, now, today)]);
         }
         columns.extend([
             gap(board.columns.len()),
@@ -1750,7 +1751,12 @@ impl App {
         size.width - sidebar as f32
     }
 
-    fn view_column<'a>(&'a self, col: &'a Column, now: jiff::Timestamp) -> Element<'a, Message> {
+    fn view_column<'a>(
+        &'a self,
+        col: &'a Column,
+        now: jiff::Timestamp,
+        today: jiff::civil::Date,
+    ) -> Element<'a, Message> {
         let selection = self.selection.filter(|s| s.column == col.id);
         // Only a Card drag registers Card slots and Column bodies; Column drags use gaps.
         let dragging = matches!(self.drag.as_ref().map(|d| d.item), Some(Item::Card(_)));
@@ -1787,17 +1793,11 @@ impl App {
             };
             let card_box = match self.open_card() == Some(card.id) {
                 true => self.view_open_card(card, title),
-                false => card_face(self.board(), card, title),
+                false => card_face(self.board(), card, title, today),
             };
             let card_box = card_box.id(card_widget(card.id)).style(move |theme| {
-                let style = aged(outline(theme), stale);
-                match lifted {
-                    true => container::Style {
-                        text_color: style.text_color.map(|c| c.scale_alpha(0.4)),
-                        ..style
-                    },
-                    false => style,
-                }
+                let style = fade_text(outline(theme), if stale { STALE_ALPHA } else { 1.0 });
+                fade_text(style, if lifted { 0.4 } else { 1.0 })
             });
             // Indicator above, padding below: Card slots touch, so no gap between them
             // falls through to the Column body.
@@ -1964,15 +1964,10 @@ impl App {
         dragging: bool,
     ) -> Element<'a, Message> {
         let hovered = self.drag.as_ref().and_then(Drag::target) == Some(Target::Column(col.id));
-        let name = text(&col.name).size(13).font(HEADING);
-        let name = clipped(name.wrapping(text::Wrapping::None), text(&col.name)).width(Fill);
         let count = count_badge(self.count_label(col), col.over_limit());
-        let strip = container(column![count, name].spacing(8).align_x(Center))
+        let strip = strip_face(col, count)
             .id(column_widget(col.id))
-            .width(STRIP_WIDTH)
             .height(Fill)
-            .padding([8, 4])
-            .clip(true)
             .style(outlined(column_style, selected || hovered));
         // A press without a drag is a click: `DragEnd` expands the Column.
         let area = drag::source(strip, Item::Column(col.id));
@@ -2085,9 +2080,10 @@ pub(crate) fn card_face<'a>(
     board: Option<&'a Board>,
     card: &'a Card,
     title: Element<'a, Message>,
+    today: jiff::civil::Date,
 ) -> container::Container<'a, Message> {
     let mut meta: Vec<Element<_>> = Vec::new();
-    meta.extend(crate::due::badge(card));
+    meta.extend(crate::due::badge(card, today));
     meta.extend(board.and_then(|b| labels::chips(b, card)));
     meta.extend(
         card.progress()
@@ -2106,6 +2102,23 @@ pub(crate) fn card_face<'a>(
     .padding([9, 11])
 }
 
+/// A collapsed Column's strip, unstyled: `count` over the clipped name (full name in a
+/// tooltip). Shared by the Board view and the image export.
+pub(crate) fn strip_face<'a>(
+    col: &'a Column,
+    count: Element<'a, Message>,
+) -> container::Container<'a, Message> {
+    let name = text(&col.name)
+        .size(COLUMN_NAME_SIZE)
+        .font(HEADING)
+        .style(text::secondary);
+    let name = clipped(name.wrapping(text::Wrapping::None), text(&col.name)).width(Fill);
+    container(column![count, name].spacing(8).align_x(Center))
+        .width(STRIP_WIDTH)
+        .padding([8, 4])
+        .clip(true)
+}
+
 /// The face's metadata (chips, badges, progress) as one row: one size, one spacing.
 pub(crate) fn metadata_row<'a>(items: Vec<Element<'a, Message>>) -> widget::Row<'a, Message> {
     row(items).spacing(6).align_y(Center)
@@ -2114,16 +2127,30 @@ pub(crate) fn metadata_row<'a>(items: Vec<Element<'a, Message>>) -> widget::Row<
 /// A Column's count as a small grey pill; over its limit, a danger-coloured one.
 /// Shared by the Board view and the image export.
 pub(crate) fn count_badge<'a>(label: String, over: bool) -> Element<'a, Message> {
+    pill(label, if over { Tone::Danger } else { Tone::Neutral })
+}
+
+/// A [`pill`]'s colour.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Tone {
+    Neutral,
+    Warning,
+    Danger,
+}
+
+/// A small rounded badge at [`META_SIZE`]: the count badge and the due badge.
+pub(crate) fn pill<'a>(label: String, tone: Tone) -> Element<'a, Message> {
     container(text(label).size(META_SIZE))
         .padding([1, 7])
         .style(move |theme: &Theme| {
             let palette = theme.extended_palette();
-            let (background, text) = match over {
-                true => (palette.danger.base.color, palette.danger.base.text),
-                false => (
+            let (background, text) = match tone {
+                Tone::Neutral => (
                     palette.background.weak.color,
                     palette.background.weak.text.scale_alpha(0.75),
                 ),
+                Tone::Warning => (palette.warning.base.color, palette.warning.base.text),
+                Tone::Danger => (palette.danger.base.color, palette.danger.base.text),
             };
             container::Style {
                 background: Some(background.into()),
@@ -2314,15 +2341,12 @@ pub(crate) fn faded(alpha: f32) -> impl Fn(&Theme, button::Status) -> button::St
 /// Text alpha on a stale Card's face (ageing).
 pub(crate) const STALE_ALPHA: f32 = 0.55;
 
-/// A Card's `style` with its face text at [`STALE_ALPHA`] when `stale` (ageing).
+/// `style` with its text at `alpha`: a stale Card ([`STALE_ALPHA`]) or a lifted one.
 /// Shared by the Board view and the image export.
-pub(crate) fn aged(style: container::Style, stale: bool) -> container::Style {
-    match stale {
-        true => container::Style {
-            text_color: style.text_color.map(|c| c.scale_alpha(STALE_ALPHA)),
-            ..style
-        },
-        false => style,
+pub(crate) fn fade_text(style: container::Style, alpha: f32) -> container::Style {
+    container::Style {
+        text_color: style.text_color.map(|c| c.scale_alpha(alpha)),
+        ..style
     }
 }
 
@@ -2338,7 +2362,7 @@ pub(crate) fn column_style(theme: &Theme) -> container::Style {
     }
 }
 
-/// A Card: a ticket on the lightest tier with a hairline edge and a one-pixel shadow (the
+/// A Card: the lightest tier with a hairline edge and a one-pixel shadow (the
 /// image export's too).
 pub(crate) fn card_style(theme: &Theme) -> container::Style {
     let bg = theme.extended_palette().background;
@@ -2396,7 +2420,8 @@ pub(crate) const META_SIZE: u32 = 12;
 /// Corner radii: Columns (and the "+ Add Column" ghost), Cards (and the header tint).
 pub(crate) const COLUMN_RADIUS: f32 = 10.0;
 pub(crate) const CARD_RADIUS: f32 = 6.0;
-/// Gaps between Columns and between Cards.
+/// Gaps between Columns and between Cards. The live Board's Card gap is its drop slot: 2 px
+/// padding below a Card, the 2 px indicator and 2 px spacing; the image export uses this.
 pub(crate) const COLUMN_GAP: f32 = 12.0;
 pub(crate) const CARD_GAP: f32 = 6.0;
 /// A collapsed Column's strip (the image export's too).

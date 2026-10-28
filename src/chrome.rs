@@ -347,6 +347,6 @@ pub fn open_command(dir: &Path) -> Command {
 }
 
 /// Fire and forget; explorer exits with 1 even on success, so the result is not checked.
-pub fn open_folder(dir: &Path) {
-    let _ = open_command(dir).spawn();
+pub fn open_path(path: &Path) {
+    let _ = open_command(path).spawn();
 }

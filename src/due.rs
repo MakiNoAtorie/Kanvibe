@@ -2,15 +2,15 @@
 //! shown as a badge on its face.
 use jiff::civil::Date;
 
-use iced::widget::{container, row, text, text_input};
-use iced::{Border, Element, Theme};
+use iced::Element;
+use iced::widget::{row, text, text_input};
 
-use crate::app::{App, Field, Message};
+use crate::app::{App, Field, Message, Tone, pill};
 use crate::domain::{Card, Data, Id};
 
-/// Today in the system time zone, read when the Board is drawn.
-pub fn today() -> Date {
-    jiff::Zoned::now().date()
+/// `now`'s date in the system time zone: "today" for the due badges of one view.
+pub fn today(now: jiff::Timestamp) -> Date {
+    now.to_zoned(jiff::tz::TimeZone::system()).date()
 }
 
 impl App {
@@ -26,7 +26,7 @@ impl App {
             .size(14)
             .on_input(move |t| Message::DueChanged(id, t))
             .on_submit(Message::CommitEdit);
-        row![text("Due").size(14), input]
+        row![text("Due").size(13).font(crate::app::HEADING), input]
             .spacing(8)
             .align_y(iced::Center)
             .into()
@@ -35,31 +35,14 @@ impl App {
 
 /// The face's due badge: neutral, warning when due today, danger when overdue. `None` when
 /// the Card has no (readable) due date. Shared by the Board view and the image export.
-pub(crate) fn badge<'a>(card: &Card) -> Option<Element<'a, Message>> {
+pub(crate) fn badge<'a>(card: &Card, today: Date) -> Option<Element<'a, Message>> {
     let due = card.due.as_deref()?;
-    let today = today();
-    let label = badge_text(due, today)?;
-    let status = status(due, today)?;
-    let badge = container(text(label).size(crate::app::META_SIZE))
-        .padding([1, 7])
-        .style(move |theme: &Theme| {
-            let palette = theme.extended_palette();
-            let (background, text) = match status {
-                Status::Future => (
-                    palette.background.weaker.color,
-                    palette.background.weaker.text.scale_alpha(0.75),
-                ),
-                Status::Today => (palette.warning.base.color, palette.warning.base.text),
-                Status::Overdue => (palette.danger.base.color, palette.danger.base.text),
-            };
-            container::Style {
-                background: Some(background.into()),
-                text_color: Some(text),
-                border: Border::default().rounded(10),
-                ..container::Style::default()
-            }
-        });
-    Some(badge.into())
+    let tone = match status(due, today)? {
+        Status::Future => Tone::Neutral,
+        Status::Today => Tone::Warning,
+        Status::Overdue => Tone::Danger,
+    };
+    Some(pill(badge_text(due, today)?, tone))
 }
 
 /// Widget Id of the open Card's Due field.
@@ -69,8 +52,7 @@ impl Data {
     /// Sets or clears the Card's due date (already ISO, from [`parse`]); a change touches the
     /// Card. `None` for an unknown Card.
     pub fn set_due(&mut self, card: Id, due: Option<String>) -> Option<()> {
-        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
-        let found = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card)?;
+        let found = self.card_mut(card)?;
         if found.due != due {
             found.due = due;
             self.touch(card);

@@ -163,10 +163,8 @@ impl Data {
     /// A Label of another Board, or an unknown Card, changes nothing.
     pub fn toggle_label(&mut self, card: Id, label: Id) -> Option<()> {
         let (b, _) = self.holding(card)?;
-        let board = &mut self.boards[b];
-        board.labels.iter().find(|l| l.id == label)?;
-        let columns = board.columns.iter_mut();
-        let card = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card)?;
+        self.boards[b].labels.iter().find(|l| l.id == label)?;
+        let card = self.card_mut(card)?;
         match card.labels.iter().position(|l| *l == label) {
             Some(at) => card.labels.remove(at),
             None => {

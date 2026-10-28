@@ -132,7 +132,7 @@ impl App {
             ),
         };
         let body: Element<_> = match card.description.is_empty() {
-            _ if editing => self.description_editor(120),
+            _ if editing => self.description_editor(),
             true => text("No description").style(text::secondary).into(),
             false => markdown::view(self.rendered.1.items(), markdown_settings(&theme))
                 .map(Message::OpenLink),
@@ -141,7 +141,7 @@ impl App {
     }
 
     /// The highlighted Markdown editor of the description being edited.
-    pub(crate) fn description_editor(&self, min_height: u32) -> Element<'_, Message> {
+    pub(crate) fn description_editor(&self) -> Element<'_, Message> {
         text_editor(&self.editor)
             .id(EDITOR)
             .placeholder("Markdown: **bold**, *italic*, [link](https://…)")
@@ -149,7 +149,7 @@ impl App {
             .key_binding(key_binding)
             .font(Font::MONOSPACE)
             .size(13)
-            .min_height(min_height)
+            .min_height(120)
             .highlight("md", self.highlighter_theme())
             .into()
     }

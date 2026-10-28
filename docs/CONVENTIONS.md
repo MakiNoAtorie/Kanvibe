@@ -14,7 +14,7 @@
 - iced 0.14 API notes: see the orchestrator's scratchpad `notes/iced-0.14.md`. `time::every` needs the iced `tokio` feature.
 
 ## Text edits (#6)
-- At most one pending edit: `App.editing: Option<PendingEdit { field, start, text, typed_at }>` for renames, or `App.capture`. `pub fn App::commit_pending()` commits whichever is open, records one step (none if unchanged), closes the field. Every arm that changes domain data or UI context (selection, Board switch, drag start, panel close/switch, opening a field) calls it first.
+- At most one pending edit: `App.editing: Option<PendingEdit { field, start, text, typed_at }>` for renames, or `App.capture`. `pub fn App::commit_pending()` commits whichever is open, records one step (none if unchanged), closes the field. Every arm that changes domain data or UI context (selection, Board switch, drag start, open Card close/switch, opening a field) calls it first.
 - `Field` enum (`BoardName(Id)`, `ColumnName(Id)`): new fields add a variant, arms in `Field::id`/`commit_pending`, and a domain getter/setter.
 - Messages: `StartEdit(Field)` (commits, focuses `EDIT_INPUT`), `EditChanged(String)`, `CommitEdit`, `EditTick(Instant)`, `CloseRequested`.
 - Live edits write into `data` per keystroke; blank text is stored as `start`, so data never holds an empty name. Only `commit_pending` records the step.
@@ -63,14 +63,12 @@
 - `.bak1` is written with `write_all` + `sync_all`, not `fs::copy` (which keeps the source mtime on Windows).
 - Storage test helpers: `saved_sample(dir)`, `create_board(app, name)`, `backups(dir)`, `read(dir, name)`, `age(dir, name, hours)`. Compare file contents as strings, not bytes.
 
-## Card panel (#8, `src/panel.rs`)
+## Card fields and validation (#8; the open Card is in the v2 section)
 - `App::update` is a thin wrapper: private `apply` (the body) then `validate_ui()`. Extend `validate_ui` for any "after every update" rule (Board gone, filter Labels gone, ...); it also calls `validate_selection`.
-- `App.panel: Option<Id>` (the Card shown); it stays when the Selection becomes column-only. Esc order now: text field, panel, Selection. A Board switch closes the panel via `validate_ui`.
-- `Data::name`/`Data::rename` also take a Card id (title); `rename` never touches `updated`. `commit_pending` calls `Data::touch(card)` only when the committed text differs from `start`. `Data::move_card` bumps `updated` on a Column change only.
-- Domain: `Card.created`/`Card.updated` (`#[serde(default)]` RFC 3339 strings), `domain::now()`, `Data::card(id)`, `Data::touch(id)`.
-- Messages `OpenPanel` (Enter), `ClosePanel` (X), `EditTitle` (F2). `Field::CardTitle`. `panel.rs` has `local_time(&str, &TimeZone)`, `WIDTH`, `App::view_panel`; `editable_name` is `pub(crate)`.
-- `view` wraps the Board as `row![container(board).width(Fill), panel]` before the Not saved bar.
-- Tests setting timestamps directly reset `app.history = Default::default()`; use `OLD = "2020-01-01T00:00:00Z"`. `tests/panel.rs` helpers: `app_with_cards()`, `card(app, title)`, `updated(app, title)`, `click(app, title)`.
+- `Data::name`/`Data::rename` also take a Card id (title); `rename` never touches `updated`. `commit_pending` calls `Data::touch(card)` only when the committed text differs from `start`.
+- Domain: `Card.created`/`Card.updated` (`#[serde(default)]` RFC 3339 strings), `domain::now()`, `Data::card(id)`, `Data::card_mut(id)` (the one mutable active-Card lookup), `Data::touch(id)`.
+- `EditTitle` (F2), `Field::CardTitle`; `editable_name` is `pub(crate)`.
+- Tests setting timestamps directly reset `app.history = Default::default()`; use `OLD = "2020-01-01T00:00:00Z"`. `tests/open_card.rs` helpers: `app_with_cards()`, `card(app, title)`, `updated(app, title)`, `click(app, title)`.
 
 ## Boards and sidebar (#12, `src/sidebar.rs`)
 - Domain: `Board.archived`; `Data::{active_board, archive_board, restore_board, delete_board, fallback(current, order)}`. Restore moves the Board to the end; delete only works on archived Boards.
@@ -82,7 +80,7 @@
 ## Archive (#11, `src/archive.rs`)
 - `Board.archived_cards: Vec<Archived { card, column_id, archived_at }>`, oldest first; `archive::rows(&Board)` newest first with Column name or "removed Column". `Data::{archive_card, remove_column, restore_card, delete_archived}`.
 - `App.archive: Option<Id>` (Board whose Archive view is open); `validate_archive` in `validate_ui`. Permanent delete uses `App.confirm` with action `Message::DeleteCard(Id)`.
-- A Card leaving the Board (archive, Move to Board) sets the selection to its neighbour and `panel = None` explicitly.
+- A Card leaving the Board (archive, Move to Board) sets the selection to its neighbour and closes the open Card (`App::card_leaves`).
 - Column ⋯ menu is `column![Set limit…, Remove Column (...)]`; Board header row `[name, Archive (n), ...]` is where filter/⋯ go.
 
 ## Drag (#15, `src/drag.rs`)
@@ -109,15 +107,14 @@
 - `Field::Description(card)`; `App.editor: text_editor::Content` mirrors `PendingEdit.text`; blank allowed. `Data::{description, set_description}`.
 - Messages `EditDescription`, `DescriptionAction`, `Format(Markup)`, `OpenLink`, `ClickOutside` (whole-view mouse_area; commits only a description edit).
 - `App.rendered` caches parsed markdown; `refresh_rendered()` runs after `validate_ui`. `open_link` is the only `webbrowser` call; `opens_in_browser` allows http/https/mailto.
-- Card face: title row (+ description icon), Label chips, Checklist progress.
 
 ## Reorder drags (#17) and Move to Board (#16)
 - `Item::{Card, Column, Board}`; `Target::{Card, Column, ColumnGap(usize), BoardGap(usize), Board(Id)}`. Gap index = slot before item `i` (`len` = after last); `BoardGap` counts active Boards only. `Data::move_column(id, gap)`, `Data::move_board(id, gap)`.
 - A target kind registers only while its matching Item is dragged (Card slots/Board rows for Cards, gaps for Columns/Boards). Match arms on `Target` end in `_ =>`.
 - Under the threshold: `Item::Board` opens the Board, `Item::Column` does nothing. Labels that capture presses use `name_widget(field, name, size, Option<Item>)` to start a drag.
 - `sidebar::board_row` is a `drag::source`; `sidebar::view` wraps rows in `drop_row` (Card drags, non-current Boards) inside `gap()`.
-- `Data::move_to_board(card, board)` (Label match by trimmed lowercase name; target colour wins; missing Label appended; "To do" created when no Columns). `src/move_board.rs`: `App.move_picker`, `OpenMove` (M / panel button), `CloseMove`, `MoveToBoard(card, board)`; `validate_move` in `validate_ui`. Cross-Board history: `record(boards, Some(source), Some(target))`.
-- `App::selection_after_leaving(card)` (archive.rs) for any action that makes a selected Card leave; then clear `panel` if it showed that Card.
+- `Data::move_to_board(card, board)` (Label match by trimmed lowercase name; target colour wins; missing Label appended; "To do" created when no Columns). `src/move_board.rs`: `App.move_picker`, `OpenMove` (M / open Card button), `CloseMove`, `MoveToBoard(card, board)`; `validate_move` in `validate_ui`. Cross-Board history: `record(boards, Some(source), Some(target))`.
+- `App::selection_after_leaving(card)` (archive.rs) picks the neighbour for any action that makes a selected Card leave; `card_leaves` uses it.
 
 ## Load repair (#22, `src/repair.rs`)
 - `repair::repair(Data) -> (Data, bool)` is the one place for load repairs (pure; bool = changed); import calls it too. New invariants go there. Lenient field readers are `pub(crate)` fns in repair.rs used via `deserialize_with` (e.g. `repair::limit`).
@@ -148,14 +145,14 @@
 ## After the whole-spec review
 - Lookups from a Card/Column go through `Data::{board_of_card, column_of_card, board_of_column, board_of_archived, column, holding}`; don't add lookups on `App`.
 - `App::record_step(board)` records a step showing one Board; call `history.record` directly only for a cross-Board move. `commit_pending()` and `History::record` return `bool` (step recorded).
-- A Card leaving the Board goes through `App::card_leaves(card, |data| …)` (selection + panel); the caller records the step.
+- A Card leaving the Board goes through `App::card_leaves(card, |data| …)` (selection + `open = false`); the caller records the step.
 - `App::dialog_open()` lists overlays that pass only Esc; new dialogs go there. `App::field_open()` lists stateful text boxes (Esc and `LeaveField`); new ones go there.
 - View helpers: `app::{clipped, clipped_text, board_name_input, dialog_header}`, `domain::cards(n)`, `transfer::stem(name)`.
 - Settings file shape lives in private `SettingsFile` in storage.rs (`"theme"`, `"window": {x, y, w, h, maximized}`); new settings go there and in both `From` impls.
 - `App::same` ignores window geometry except while closing. A leftover `kanvibe.json.tmp` is removed only after a successful `storage::open`.
 
 ## Esc order (current)
-- cancel drag → shortcuts overlay → notice → close dialog → confirm → label picker → move picker → text field / limit / Board menu → Board menu / Labels filter list → Archive view → panel → filter → selection.
+- cancel drag → shortcuts overlay → notice → close dialog → confirm → label picker → move picker → Search (when no text field is open) → text field / limit / Board menu → Board menu / Labels filter list → Archive view → open Card (clears `open` even with no Card selected) → filter → selection.
 
 ## Undo history (`src/history.rs`)
 - `App.history: History` exposes `sync`, `record`, `undo`, `redo`. `update` calls `self.history.sync(&self.data.boards)` first (adopts current Boards as baseline, records nothing).
@@ -193,14 +190,14 @@
 - Dialogs with a `space::horizontal()` (right-aligned buttons, `dialog_header`) need a fixed `width`, not `max_width`, or they stretch to the window. Controls that appear and disappear in a row keep their slot (transparent and inert when off) so neighbours don't shift. Drop indicators stay always laid out.
 
 ## v2 (`docs/spec-v2.md`)
-- Open Card: `App.open: bool`; the open Card is the selected Card, so arrows move it and clearing the Selection closes it (`validate_ui` ends with `open &= selection has a Card`). `App::view_open_card(card, title)` is its body: title, Labels, description, Checklist, Due row, Files, then `column![actions, times]`; new per-Card UI goes in that order. Enter opens (`OpenCard`), the X or Esc closes (`CloseCard`); `OpenCapture` closes it. `app::local_time` formats timestamps. ADR 0004.
-- Face: `card_face` builds a `meta` list (due badge, Label chips, Checklist progress, files marker) at `META_SIZE`, drawn by `metadata_row`; the description's first line comes from `description::face_preview`. Sizes, radii and gaps are the constants beside `COLUMN_WIDTH` (`BOARD_TITLE_SIZE`, `COLUMN_NAME_SIZE`, `CARD_TITLE_SIZE`, `META_SIZE`, `COLUMN_RADIUS`, `CARD_RADIUS`, `COLUMN_GAP`, `CARD_GAP`, `STRIP_WIDTH`); no new literals for those roles. Column selection is `header_tint`; `outlined` is for Cards only. Theme tests check `extended_palette().is_dark`.
-- Ageing: `domain::STALE_DAYS` (14) and `Card::is_stale(now)` are the one rule; `app::aged(style, stale)` fades the face text (`STALE_ALPHA`) on top of `card_style`, never inside it. Read the clock once per view and pass `now` down (`view_column(col, now)`, `image::view`). `Data::move_card` touches the moved Card unless its position is unchanged; neighbours are never touched.
-- Due date (`src/due.rs`): `Card.due: Option<String>` ISO date. `due::parse` (three typed formats, `None` for invalid or blank), `due::status(due, today)`, `due::badge_text`, `due::badge(card)` (the one place "today" is read for the face), `Data::set_due`. `Field::Due(Id)` is a pending edit that never writes live text to data (stored form differs from typed form): `DueChanged(Id, String)` starts the edit if needed and forwards to `EditChanged`; Enter commits; a bad date reverts and records nothing. Pattern for any always-visible box that is a pending edit.
-- Files (`src/files.rs`): `Card.files: Vec<String>` absolute paths. `Data::add_file` (no duplicates) and `remove_file` touch the Card themselves. Messages `AddFile(Id)` -> rfd Open dialog task -> `FileChosen(Id, Option<PathBuf>)`; `RemoveFile(Id, usize)`; `OpenFile(String)` via `chrome::open_folder`. `files::marker(card)` is the face marker; a missing file renders inert with " (not found)".
-- Collapse: `Column.collapsed` (`skip_serializing_if = "std::ops::Not::not"`), `Data::toggle_collapse`, `Message::ToggleCollapse(Id)` from the menu ("Collapse") or a click on the strip. `App::view_strip(col, selected, dragging)` at the top of `view_column`; the whole strip is the Column's drag handle and its drop target (drop = append at `cards.len()`, skipping `filter::placement`). A collapsed Column has no visible Cards: Left/Right land on the Column, `validate_selection` drops a selected Card there. `storage::VERSION` is 2 (`pub(crate)`, shared by Board export); v1 files load unchanged.
+- Open Card: `App.open: bool`; the open Card is the selected Card while `open` is set (`App::open_card()`), so arrows move it. `open` is sticky: a Column-only Selection (a click on a Column body, arrows through an empty or collapsed Column) keeps it, and the next selected Card shows open. It is cleared by Esc, `CloseCard`, a Board switch (`left_board`), the Card leaving (`card_leaves`), `OpenCapture`, and a Selection cleared to `None` (`validate_ui`). `App::view_open_card(card, title)` is its body: title, Labels, description, Checklist, Due row, Files, then `column![actions, times]`; new per-Card UI goes in that order. Enter opens (`OpenCard`), the X (`CloseCard`) or Esc closes. `app::local_time` formats timestamps. ADR 0004.
+- Face: `card_face` builds a `meta` list (due badge, Label chips, Checklist progress, files marker) at `META_SIZE`, drawn by `metadata_row`; badges are `app::pill(label, Tone)` (`count_badge` and the due badge); the description's first line comes from `description::face_preview`. Sizes, radii and gaps are the constants beside `COLUMN_WIDTH` (`BOARD_TITLE_SIZE`, `COLUMN_NAME_SIZE`, `CARD_TITLE_SIZE`, `META_SIZE`, `COLUMN_RADIUS`, `CARD_RADIUS`, `COLUMN_GAP`, `CARD_GAP`, `STRIP_WIDTH`); no new literals for those roles. Column selection is `header_tint`; `outlined` is for Cards only. Theme tests check `extended_palette().is_dark`.
+- Ageing: `domain::STALE_DAYS` (14) and `Card::is_stale(now)` are the one rule; `app::fade_text(style, alpha)` fades the face text (`STALE_ALPHA`; a lifted Card 0.4) on top of `card_style`, never inside it. Read the clock once per view and pass `now` and `today = due::today(now)` down (`view_column(col, now, today)`, `card_face(.., today)`, `image::view`). `Data::move_card` touches the moved Card unless its position is unchanged; neighbours are never touched.
+- Due date (`src/due.rs`): `Card.due: Option<String>` ISO date. `due::parse` (three typed formats, `None` for invalid or blank), `due::status(due, today)`, `due::badge_text`, `due::badge(card, today)`, `Data::set_due`. `Field::Due(Id)` is a pending edit that never writes live text to data (stored form differs from typed form): `DueChanged(Id, String)` starts the edit if needed (dropping `StartEdit`'s focus task, which would move the cursor to the end) and forwards to `EditChanged`; Enter commits; a bad date reverts and records nothing. Pattern for any always-visible box that is a pending edit.
+- Files (`src/files.rs`): `Card.files: Vec<String>` absolute paths. `Data::add_file` (no duplicates) and `remove_file` touch the Card themselves. Messages `AddFile(Id)` -> rfd Open dialog task -> `FileChosen(Id, Option<PathBuf>)`; `RemoveFile(Id, usize)`; `OpenFile(String)` via `chrome::open_path`. `files::marker(card)` is the face marker; a missing file renders inert with " (not found)".
+- Collapse: `Column.collapsed` (`skip_serializing_if = "std::ops::Not::not"`), `Data::toggle_collapse`, `Message::ToggleCollapse(Id)` from the menu ("Collapse") or a click on the strip. `App::view_strip(col, selected, dragging)` at the top of `view_column` wraps `app::strip_face(col, count)`, which the image export uses too; the whole strip is the Column's drag handle and its drop target (drop = append at `cards.len()`, skipping `filter::placement`). A collapsed Column has no visible Cards: Left/Right land on the Column, `validate_selection` drops a selected Card there. Anything that must show a Card or a box inside a Column calls `App::expand(column)` first (expands a collapsed Column as an undo step): the Search pick and `OpenCapture`. Enter in the Filter skips collapsed Columns. `storage::VERSION` is 2 (`pub(crate)`, shared by Board export); v1 files load unchanged.
 - Duplicate: `Data::duplicate_card(card)` clones the struct, then fresh IDs, Items unticked, timestamps now; new per-Card fields come along unless they must not. `DuplicateCard` from Ctrl+D or the open Card's button; selects the copy.
-- Search (`src/search.rs`): `App.search: Option<Search { text, highlight }>`; `search::hits(&Data, &str) -> Vec<Hit>` over all Boards (Archive hits have `column: None`), nothing under two characters. View priority is Search, then Archive view, then Board. `SearchPick` runs outside `apply` (nested `update`s) because `validate_ui`'s `left_board` would wipe the Selection after a Board switch. `allowed` gates keys while Search is open; new global shortcuts need adding there. Esc order: move picker, Search, text field, Archive view, open Card, filter, selection. Reveal an archived Card with `app::reveal(archive::SCROLL.into(), archive::row_widget(card), false)`.
+- Search (`src/search.rs`): `App.search: Option<Search { text, highlight }>`; `search::hits(&Data, &str) -> Vec<Hit>` over all Boards (Archive hits have `column: None`), nothing under two characters. View priority is Search, then Archive view, then Board. `SearchPick` runs outside `apply` (nested `update`s) because `validate_ui`'s `left_board` would wipe the Selection after a Board switch. `allowed` gates keys while Search is open; new global shortcuts need adding there. Esc order: see "Esc order (current)". Reveal an archived Card with `app::reveal(archive::SCROLL.into(), archive::row_widget(card), false)`.
 - Capture: titles go through `Data::add_captured` (`labels::label_tokens` strips `#name` words that match a Label case-insensitively; unmatched stay; a title with no match or only matches comes back untouched, Labels still attached); `add_card` stays unaware.
 - Column keys: Ctrl+Left/Right with a Column selected and no Card moves the Column (`App::column_move`); it is no longer a no-op.
 - Tests: feature files with local helpers are fine (`tests/duplicate.rs`, `files.rs`, `due.rs`, `collapse.rs`, `ageing.rs`, `search.rs`, `open_card.rs`). Card and Column literals in tests need `due`, `files`, `collapsed`. `Data::add_label` takes a palette key ("red"), not hex. `tests/keys.rs` `press()` maps letters to physical keys; add new letters there.

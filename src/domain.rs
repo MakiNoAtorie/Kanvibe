@@ -578,10 +578,15 @@ impl Data {
             .find(|c| c.id == id)
     }
 
+    /// The active Card with this ID, to change.
+    pub(crate) fn card_mut(&mut self, id: Id) -> Option<&mut Card> {
+        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
+        columns.flat_map(|c| &mut c.cards).find(|c| c.id == id)
+    }
+
     /// Marks the Card as changed just now.
     pub fn touch(&mut self, card: Id) {
-        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
-        if let Some(card) = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card) {
+        if let Some(card) = self.card_mut(card) {
             card.updated = now();
         }
     }
@@ -593,9 +598,7 @@ impl Data {
 
     /// Replaces the Card's description as typed. Does not touch `updated`: the caller does on commit.
     pub fn set_description(&mut self, card: Id, text: &str) -> Option<()> {
-        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
-        let card = columns.flat_map(|c| &mut c.cards).find(|c| c.id == card)?;
-        card.description = text.into();
+        self.card_mut(card)?.description = text.into();
         Some(())
     }
 
@@ -691,7 +694,7 @@ impl Data {
     /// and removes it again if it stays blank. Does not touch `updated`. Unknown Card: nothing.
     pub fn add_item(&mut self, card: Id, after: Option<Id>) -> Option<Id> {
         let id = self.new_id();
-        let list = self.items_of(card)?;
+        let list = &mut self.card_mut(card)?.checklist;
         let at = after.and_then(|a| list.iter().position(|i| i.id == a));
         let at = at.map_or(list.len(), |p| p + 1);
         list.insert(
@@ -725,11 +728,5 @@ impl Data {
         let list = self.items_mut().find(|l| l.iter().any(|i| i.id == item))?;
         list.retain(|i| i.id != item);
         Some(())
-    }
-
-    fn items_of(&mut self, card: Id) -> Option<&mut Vec<Item>> {
-        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
-        let mut cards = columns.flat_map(|c| &mut c.cards);
-        cards.find(|c| c.id == card).map(|c| &mut c.checklist)
     }
 }

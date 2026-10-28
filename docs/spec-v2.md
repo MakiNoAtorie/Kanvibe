@@ -44,7 +44,7 @@ Ten changes, each small, none adding a subsystem:
 12. As a user, I want archived Cards and Cards on archived Boards included, marked "archived", so that nothing is out of reach.
 13. As a user, I want results grouped under their Board's name, each result showing the Card's title, its Column (or "Archive"), and its Label chips, so that I can tell matches apart.
 14. As a user, I want results to appear as I type, with no result until two characters are typed, so that the list is never the whole world.
-15. As a user, I want to click a result (or move through results with Up/Down and press Enter) to open its Board with that Card selected and open, so that one keystroke takes me there.
+15. As a user, I want to click a result (or move through results with Up/Down and press Enter) to open its Board with that Card selected and open, its Column expanded first if collapsed, so that one keystroke takes me there.
 16. As a user, I want picking an archived Card to open its Board's Archive view scrolled to it, so that I can restore it from there.
 17. As a user, I want a result on an archived Board to be shown but not openable, with a tooltip saying to restore the Board first, so that the rule about archived Boards stays simple.
 18. As a user, I want Esc or "Back to Board" to leave Search and return to the Board I was on, so that I can get back quickly.
@@ -54,7 +54,7 @@ Ten changes, each small, none adding a subsystem:
 
 20. As a user, I want "Collapse" in a Column's menu to fold it to a narrow strip, so that a wide Board fits.
 21. As a user, I want the strip to show the Column's count (or `count/limit`) and its name, with the full name in a tooltip, so that I still know what is in it.
-22. As a user, I want a click anywhere on the strip to expand the Column again, so that unfolding is one action.
+22. As a user, I want a click anywhere on the strip to expand the Column again, and N on a collapsed Column to expand it before opening the Capture box, so that unfolding is one action.
 23. As a user, I want the fold remembered in the data file, so that the Board opens the way I left it.
 24. As a user, I want to drop a Card on a collapsed Column and have it land at the bottom, so that folding doesn't block moving work.
 25. As a user, I want Ctrl+Left/Right to move the selected Card into a collapsed Column at its bottom, and the Selection to land on the Column with no Card, so that the keyboard path still works.
@@ -111,7 +111,7 @@ Ten changes, each small, none adding a subsystem:
 58. As a user, I want Enter on the selected Card, or a click on it, to expand it in place inside its Column instead of opening a panel, so that the Board keeps its full width.
 59. As a user, I want the open Card to show, top to bottom: the title, the Label chips with "+ Add Label", the rendered description with its Edit button, the Checklist, the Files list, the due date field, and a footer with "Move to Board…", "Duplicate", "Archive" and the created and updated times, so that everything the panel showed is still there.
 60. As a user, I want the open Card to be the selected Card and to follow the arrow keys, so that I can review Cards one after another as before.
-61. As a user, I want Esc, a Board switch, or the Card leaving the Board to close it, and a click on empty Board space to leave it open, so that it doesn't vanish by accident.
+61. As a user, I want the open Card to stay open through clicks on Column bodies and arrows through empty Columns, and to close only on Esc, its ✕, a Board switch, or when it leaves the Board, so that it doesn't vanish by accident.
 62. As a user, I want F2, E, L and M to work in the open Card as they did in the panel, so that my hands don't relearn anything.
 63. As a user, I want the open Card to render as a normal face in the PNG image, so that the image shows the Board, not my editing state.
 64. As a user, I want the open Card to stay visible under a Filter it doesn't match, so that what I am working on never vanishes.
@@ -154,7 +154,7 @@ Ten changes, each small, none adding a subsystem:
 
 ### App state and Messages
 
-- The Card panel state becomes a single `open: bool`: when true, the selected Card renders expanded. The panel module goes away; its pieces (labels row, description, checklist, times) move into the open Card's view inside the Column. "Open panel" and "close panel" messages become open and close of the Card. The validation that ran after each update keeps clearing `open` when the Selection has no Card.
+- The Card panel state becomes a single `open: bool`: when true, the selected Card renders expanded. The panel module goes away; its pieces (labels row, description, checklist, times) move into the open Card's view inside the Column. "Open panel" and "close panel" messages become open and close of the Card. `open` survives a Selection on a Column with no Card; the validation that runs after each update clears it only when there is no Selection at all.
 - New Messages: set due text / commit due (the due field is a pending text edit like a rename, so it follows the one-pending-edit rule and the idle write); duplicate Card; add file (runs the native Open dialog as a task, like Import does), file chosen, remove file, open file; toggle Column collapse; open Search, Search text changed, Search move (Up/Down), Search pick, close Search; move Column (Direction). Ctrl+Shift+F and Ctrl+D are new arms in the key mapping; Ctrl+Left/Right maps to the existing move-Card message and the update arm branches on whether the Selection has a Card.
 - Search is a view state like the Archive view: it replaces the Columns, owns a text input with a widget ID and an `Input` variant so the key mapping knows a text field is focused, and a highlighted index for Up/Down/Enter. Opening Search commits any pending edit; leaving it clears its text. Picking a hit on an active Board switches Board, sets the Selection to that Card and sets `open`; a hit in an Archive opens that Board's Archive view and reveals the Card.
 - Collapsed Columns: the Selection may rest on a collapsed Column with no Card. Left/Right across a collapsed Column lands on the Column itself. The drop target of a collapsed Column is its whole strip and means "append". The strip is a fixed narrow width constant beside the Column width constant. iced has no rotated text, so the strip shows the count badge on top and the name below it clipped to the strip width, with the existing clipped-with-tooltip helper giving the full name.

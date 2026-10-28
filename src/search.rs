@@ -5,7 +5,9 @@ use iced::widget::{button, column, container, mouse_area, operation, row, scroll
 use iced::widget::{text, text_input};
 use iced::{Center, Element, Fill, Task, mouse};
 
-use crate::app::{App, Direction, HEADING, Message, Selection, card_style, clipped_text};
+use crate::app::{
+    App, BOARD_TITLE_SIZE, Direction, HEADING, Message, Selection, card_style, clipped_text,
+};
 use crate::domain::{Board, Card, Data, Id};
 use crate::filter::Filter;
 
@@ -133,7 +135,7 @@ impl App {
             return space().into();
         };
         let header = row![
-            text("Search").size(20),
+            text("Search").size(BOARD_TITLE_SIZE),
             space::horizontal(),
             crate::chrome::tip(
                 button("Back to Board").on_press(Message::CloseSearch),

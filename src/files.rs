@@ -13,7 +13,7 @@ impl Data {
     /// Adds a path to the Card's files and touches it; `None` when the Card is unknown or
     /// already holds that path.
     pub fn add_file(&mut self, card: Id, path: &str) -> Option<()> {
-        let files = self.files_of(card)?;
+        let files = &mut self.card_mut(card)?.files;
         if files.iter().any(|f| f == path) {
             return None;
         }
@@ -24,16 +24,10 @@ impl Data {
 
     /// Removes the Card's file at `index` and touches it; `None` when there is none.
     pub fn remove_file(&mut self, card: Id, index: usize) -> Option<()> {
-        let files = self.files_of(card)?;
+        let files = &mut self.card_mut(card)?.files;
         (index < files.len()).then(|| files.remove(index))?;
         self.touch(card);
         Some(())
-    }
-
-    fn files_of(&mut self, card: Id) -> Option<&mut Vec<String>> {
-        let columns = self.boards.iter_mut().flat_map(|b| &mut b.columns);
-        let mut cards = columns.flat_map(|c| &mut c.cards);
-        cards.find(|c| c.id == card).map(|c| &mut c.files)
     }
 }
 
@@ -75,7 +69,7 @@ impl App {
                     self.record_step(self.data.board_of_card(card));
                 }
             }
-            Message::OpenFile(path) => crate::chrome::open_folder(Path::new(&path)),
+            Message::OpenFile(path) => crate::chrome::open_path(Path::new(&path)),
             _ => {}
         }
         Task::none()
@@ -88,7 +82,7 @@ impl App {
                 .file_name()
                 .map_or(path.clone(), |n| n.to_string_lossy().into_owned());
             // Checked at view time: a moved or renamed file shows as not found.
-            let link = match Path::new(path).exists() {
+            let entry = match Path::new(path).exists() {
                 true => button(text(name).size(13))
                     .style(button::text)
                     .on_press(Message::OpenFile(path.clone())),
@@ -100,9 +94,9 @@ impl App {
                 .style(button::text),
             };
             row![
-                tip(link, path.as_str()),
+                tip(entry, path.as_str()),
                 tip(
-                    button(text("✕").size(12).style(text::secondary))
+                    button(text("✕").size(crate::app::META_SIZE).style(text::secondary))
                         .style(button::text)
                         .on_press(Message::RemoveFile(card.id, i)),
                     "Remove file"
