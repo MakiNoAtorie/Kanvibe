@@ -29,28 +29,28 @@ fn filter(text: &str, labels: &[Id]) -> Filter {
 #[test]
 fn text_matches_titles_and_descriptions_ignoring_case() {
     let f = filter("  bug ", &[]);
-    assert!(f.matches(&card("Fix the BUG", "", &[])));
-    assert!(f.matches(&card("Login", "a nasty Bug here", &[])));
-    assert!(!f.matches(&card("Login", "works", &[])));
+    assert!(f.matches(&card("Fix the BUG", "", &[]), &[]));
+    assert!(f.matches(&card("Login", "a nasty Bug here", &[]), &[]));
+    assert!(!f.matches(&card("Login", "works", &[]), &[]));
 }
 
 #[test]
 fn labels_match_any_of_and_combine_with_the_text() {
     let f = filter("", &[7, 8]);
-    assert!(f.matches(&card("A", "", &[8])));
-    assert!(!f.matches(&card("A", "", &[9])));
-    assert!(!f.matches(&card("A", "", &[])));
+    assert!(f.matches(&card("A", "", &[8]), &[]));
+    assert!(!f.matches(&card("A", "", &[9]), &[]));
+    assert!(!f.matches(&card("A", "", &[]), &[]));
     let f = filter("login", &[7]);
-    assert!(f.matches(&card("Login", "", &[7])));
-    assert!(!f.matches(&card("Login", "", &[])));
-    assert!(!f.matches(&card("Logout", "", &[7])));
+    assert!(f.matches(&card("Login", "", &[7]), &[]));
+    assert!(!f.matches(&card("Login", "", &[]), &[]));
+    assert!(!f.matches(&card("Logout", "", &[7]), &[]));
 }
 
 #[test]
 fn an_empty_filter_is_off_and_matches_everything() {
     let f = filter("   ", &[]);
     assert!(!f.is_on());
-    assert!(f.matches(&card("anything", "", &[])));
+    assert!(f.matches(&card("anything", "", &[]), &[]));
     assert!(filter("x", &[]).is_on());
     assert!(filter("", &[1]).is_on());
 }
@@ -424,4 +424,30 @@ fn filter_labels_that_no_longer_exist_are_dropped() {
     );
     assert!(app.filter.labels.is_empty());
     assert_eq!(shown(&app, 0), ["A", "B"]);
+}
+
+#[test]
+fn filter_text_also_matches_label_names() {
+    let mut app = app_with(&[&["A", "B", "C"]]);
+    label(&mut app, "Urgent", &["B"]);
+    send(&mut app, [Message::FilterChanged(" urg ".into())]);
+    assert_eq!(shown(&app, 0), ["B"]);
+    assert!(!app.nothing_matches());
+}
+
+#[test]
+fn ctrl_left_right_under_a_filter_lands_after_the_last_visible_card() {
+    use kanvibe::app::Direction::*;
+    let mut app = app_with(&[&["bug 1"], &["bug 2", "h1", "h2"]]);
+    send(&mut app, [Message::FilterChanged("bug".into())]);
+    select(&mut app, "bug 1");
+    send(&mut app, [Message::MoveCard(Right)]);
+    assert_eq!(titles(&app, 1), ["bug 2", "bug 1", "h1", "h2"]); // as a drop on the Column body
+    send(&mut app, [Message::MoveCard(Left)]);
+    assert_eq!(titles(&app, 0), ["bug 1"]);
+    // No Filter: the bottom of the Column, as before.
+    send(&mut app, [Message::ClearFilter]);
+    select(&mut app, "bug 1");
+    send(&mut app, [Message::MoveCard(Right)]);
+    assert_eq!(titles(&app, 1), ["bug 2", "h1", "h2", "bug 1"]);
 }

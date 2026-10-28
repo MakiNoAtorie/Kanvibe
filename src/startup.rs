@@ -111,6 +111,17 @@ impl Screen {
         }
     }
 
+    /// The window title: "<Board> – Kanvibe" while a Board is open, else "Kanvibe".
+    pub fn title(&self) -> String {
+        match self {
+            Screen::App(app) => match app.board() {
+                Some(board) => format!("{} – Kanvibe", board.name),
+                None => "Kanvibe".into(),
+            },
+            Screen::Problem(_) => "Kanvibe".into(),
+        }
+    }
+
     pub fn theme(&self) -> iced::Theme {
         match self {
             Screen::App(app) => app.theme(),
@@ -201,7 +212,7 @@ pub fn run() -> iced::Result {
     let screen = std::cell::Cell::new(Some(screen));
     let boot = move || screen.take().expect("iced boots once");
     iced::application(boot, Screen::update, Screen::view)
-        .title("Kanvibe")
+        .title(Screen::title)
         .window(window)
         .theme(Screen::theme)
         .subscription(Screen::subscription)

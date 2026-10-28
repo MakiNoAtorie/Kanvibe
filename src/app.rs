@@ -121,6 +121,8 @@ pub enum Direction {
 pub struct LimitInput {
     pub column: Id,
     pub text: String,
+    /// The last submit was refused; the prompt says why until the text changes.
+    pub refused: bool,
 }
 
 /// The window close: the app waits for the save, asks when it fails, then exits.
@@ -216,6 +218,10 @@ pub enum Message {
     OpenCapture(Id),
     CaptureChanged(String),
     SubmitCapture,
+    /// A paste into the Capture box (its text after the paste); the clipboard is re-read.
+    CapturePasted(String),
+    /// The clipboard after a paste: two or more non-blank lines become one Card each.
+    CaptureLines(Option<String>),
     Escape,
     /// A key press no widget captured; `update` asks which field has focus, then maps it.
     Key(keyboard::Event),
@@ -300,7 +306,7 @@ pub enum Message {
     AskDelete(Id),
     /// Permanently deletes an archived Card (the action of its [`Confirm`]).
     DeleteCard(Id),
-    /// "Add item" in the Card's Checklist: a blank Item at the end, in edit.
+    /// "+ Add Checklist Item" in the Card's Checklist: a blank Item at the end, in edit.
     AddItem(Id),
     /// Enter in an Item: commit it and, unless it was blank, add one below.
     SubmitItem(Id),
@@ -448,6 +454,13 @@ impl App {
                     return self.reveal_selection();
                 }
             }
+            Message::CapturePasted(text) => {
+                if let Some(capture) = &mut self.capture {
+                    capture.text = text;
+                    return iced::clipboard::read().map(Message::CaptureLines);
+                }
+            }
+            Message::CaptureLines(text) => return self.capture_lines(text.unwrap_or_default()),
             Message::Escape if self.drag.is_some() => self.drag = None, // first Esc layer
             Message::Escape if self.shortcuts => self.shortcuts = false,
             Message::Escape if self.notice.is_some() => self.notice = None,
@@ -496,14 +509,14 @@ impl App {
             }
             Message::OpenPanel => {
                 self.commit_pending();
-                self.panel = self.selection.and_then(|s| s.card).or(self.panel);
+                self.open_panel();
             }
             Message::ClosePanel => {
                 self.commit_pending();
                 self.panel = None;
             }
             Message::EditDescription => {
-                if let Some(card) = self.panel {
+                if let Some(card) = self.open_panel() {
                     return self.update(Message::StartEdit(Field::Description(card)));
                 }
             }
@@ -520,7 +533,7 @@ impl App {
                 }
             }
             Message::EditTitle => {
-                if let Some(card) = self.panel {
+                if let Some(card) = self.open_panel() {
                     return self.update(Message::StartEdit(Field::CardTitle(card)));
                 }
             }
@@ -692,6 +705,7 @@ impl App {
             Message::StartEdit(field) => {
                 self.commit_pending();
                 self.board_menu = false;
+                self.column_menu = None;
                 let id = field.id();
                 let start = match field {
                     Field::Description(card) => self.data.description(card),
@@ -799,21 +813,29 @@ impl App {
                 self.column_menu = None;
                 if let Some(col) = self.data.column(column) {
                     let text = col.limit.map(|l| l.to_string()).unwrap_or_default();
-                    self.limit_input = Some(LimitInput { column, text });
+                    self.limit_input = Some(LimitInput {
+                        column,
+                        text,
+                        refused: false,
+                    });
                     return operation::focus(LIMIT_INPUT);
                 }
             }
             Message::LimitChanged(text) => {
                 if let Some(input) = &mut self.limit_input {
                     input.text = text;
+                    input.refused = false;
                 }
             }
             Message::SubmitLimit => {
-                if let Some(LimitInput { column, text }) = self.limit_input.clone()
-                    && self.data.set_limit(column, &text).is_some()
-                {
-                    self.limit_input = None;
-                    self.record_step(self.data.board_of_column(column));
+                if let Some(LimitInput { column, text, .. }) = self.limit_input.clone() {
+                    match self.data.set_limit(column, &text) {
+                        Some(()) => {
+                            self.limit_input = None;
+                            self.record_step(self.data.board_of_column(column));
+                        }
+                        None => self.limit_input.as_mut().expect("open").refused = true,
+                    }
                 }
             }
             Message::CopySaved(Some(Err(e))) => self.not_saved = Some(e),
@@ -827,6 +849,7 @@ impl App {
             Message::ArchiveBoard(board) => {
                 self.commit_pending();
                 if self.data.archive_board(board).is_some() {
+                    self.archived_open = true; // show where it went
                     self.record_step(None);
                 }
             }
@@ -880,6 +903,7 @@ impl App {
             Message::RestoreBoard(board) => {
                 self.commit_pending();
                 if self.data.restore_board(board).is_some() {
+                    self.current_board = Some(board);
                     self.record_step(None);
                 }
             }
@@ -967,6 +991,39 @@ impl App {
         self.record_step(self.data.board_of_column(column));
     }
 
+    /// A multi-line paste into the Capture box: one Card per non-blank line, as one undo step,
+    /// the last one selected. The box's text (typed and pasted) is replaced by the Cards and the
+    /// box stays open, empty. A single line changes nothing: the box already holds it.
+    fn capture_lines(&mut self, text: String) -> Task<Message> {
+        let lines: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let Some(capture) = self.capture.as_mut().filter(|_| lines.len() > 1) else {
+            return Task::none();
+        };
+        capture.text.clear();
+        let column = capture.column;
+        for line in lines {
+            if let Some(card) = self.data.add_card(column, line) {
+                let card = Some(card);
+                self.selection = Some(Selection { column, card });
+                if self.filter.is_on() {
+                    self.filter_kept.extend(card);
+                }
+            }
+        }
+        self.record_step(self.data.board_of_column(column));
+        self.reveal_selection()
+    }
+
+    /// Shows the selected Card in the panel (else keeps the open one) and returns it.
+    pub(crate) fn open_panel(&mut self) -> Option<Id> {
+        self.panel = self.selection.and_then(|s| s.card).or(self.panel);
+        self.panel
+    }
+
     /// Records an undo step (if anything changed) that shows `board` on undo and on redo;
     /// `None` keeps the current Board. `true` when a step was recorded.
     pub(crate) fn record_step(&mut self, board: Option<Id>) -> bool {
@@ -1033,6 +1090,10 @@ impl App {
                 }
                 Field::LabelName(label) => self.data.board_of_label(label),
                 Field::Description(card) => {
+                    if edit.text.trim().is_empty() {
+                        // Whitespace only is no description: "" is the one rule everywhere.
+                        self.data.set_description(card, "");
+                    }
                     if self.data.description(card) != Some(edit.start.as_str()) {
                         self.data.touch(card);
                     }
@@ -1274,10 +1335,19 @@ impl App {
         };
         let content: Element<_> = match &self.not_saved {
             Some(error) => column![
-                container(text(error))
-                    .width(Fill)
-                    .padding(8)
-                    .style(container::danger),
+                container(
+                    row![
+                        text(error).width(Fill),
+                        button("Retry now")
+                            .style(button::secondary)
+                            .on_press_maybe(self.writing.is_none().then_some(Message::RetrySave)),
+                    ]
+                    .spacing(8)
+                    .align_y(Center)
+                )
+                .width(Fill)
+                .padding(8)
+                .style(container::danger),
                 content
             ]
             .into(),
@@ -1354,9 +1424,12 @@ impl App {
             button(text(format!("Archive ({})", board.archived_cards.len())))
                 .style(button::secondary)
                 .on_press(Message::OpenArchive),
-            button("⋯")
-                .style(button::text)
-                .on_press(Message::ToggleBoardMenu),
+            crate::chrome::tip(
+                button("⋯")
+                    .style(button::text)
+                    .on_press(Message::ToggleBoardMenu),
+                "Board menu"
+            ),
         ]
         .spacing(8)
         .align_y(Center);
@@ -1426,11 +1499,14 @@ impl App {
         });
         let cards = cards.chain([drag::indicator(gap == Some(col.cards.len()))]);
         let footer: Element<_> = match &self.capture {
-            Some(capture) if capture.column == col.id => text_input("Card title", &capture.text)
-                .id(CAPTURE_INPUT)
-                .on_input(Message::CaptureChanged)
-                .on_submit(Message::SubmitCapture)
-                .into(),
+            Some(capture) if capture.column == col.id => {
+                text_input("Card title (Enter adds, Esc cancels)", &capture.text)
+                    .id(CAPTURE_INPUT)
+                    .on_input(Message::CaptureChanged)
+                    .on_paste(Message::CapturePasted)
+                    .on_submit(Message::SubmitCapture)
+                    .into()
+            }
             _ => crate::chrome::tip(
                 button("+ Add Card")
                     .style(button::text)
@@ -1444,28 +1520,47 @@ impl App {
         } else {
             count
         };
+        let count = match col.limit_tip() {
+            Some(tip) => crate::chrome::tip(count, tip),
+            None => count.into(),
+        };
         // Dragged by the header only; the name label forwards the press (it captures its own).
         let item = Item::Column(col.id);
         let header = row![
             self.name_widget(Field::ColumnName(col.id), &col.name, 16, Some(item)),
             count,
-            button("⋯")
-                .style(button::text)
-                .on_press(Message::ToggleColumnMenu(col.id)),
+            crate::chrome::tip(
+                button("⋯")
+                    .style(button::text)
+                    .on_press(Message::ToggleColumnMenu(col.id)),
+                "Column menu"
+            ),
         ]
         .spacing(8)
         .align_y(Center);
         let header = drag::source(header, item);
         let menu: Option<Element<_>> = match &self.limit_input {
             Some(input) if input.column == col.id => Some(
-                text_input("Limit (blank removes)", &input.text)
-                    .id(LIMIT_INPUT)
-                    .on_input(Message::LimitChanged)
-                    .on_submit(Message::SubmitLimit)
-                    .into(),
+                column![
+                    text_input("Limit (blank removes)", &input.text)
+                        .id(LIMIT_INPUT)
+                        .on_input(Message::LimitChanged)
+                        .on_submit(Message::SubmitLimit)
+                ]
+                .extend(input.refused.then(|| {
+                    text("Enter a whole number of 1 or more, or leave blank to remove")
+                        .size(12)
+                        .style(text::danger)
+                        .into()
+                }))
+                .spacing(4)
+                .into(),
             ),
             _ if self.column_menu == Some(col.id) => Some(
                 column![
+                    button("Rename")
+                        .style(button::secondary)
+                        .on_press(Message::StartEdit(Field::ColumnName(col.id))),
                     button("Set limit…")
                         .style(button::secondary)
                         .on_press(Message::OpenLimit(col.id)),
@@ -1504,7 +1599,7 @@ impl App {
 
     fn view_empty(&self) -> Element<'_, Message> {
         let content: Element<_> = match &self.board_name {
-            Some(name) => column![text("Name your Board"), board_name_input(name).width(280)]
+            Some(name) => column![text("Name your Board"), board_name_input(name).width(320)]
                 .spacing(8)
                 .into(),
             None if self.data.boards.is_empty() => button("Create your first Board")
@@ -1537,7 +1632,10 @@ pub(crate) fn card_face<'a>(
         ]
         .spacing(4)
         .extend(chips)
-        .extend(card.progress().map(|p| text(p).size(12).into())),
+        .extend(
+            card.progress()
+                .map(|p| text(format!("☑ {p}")).size(12).into()),
+        ),
     )
     .width(Fill)
     .padding(8)
@@ -1577,12 +1675,18 @@ pub(crate) fn clipped_text<'a>(
     clipped(text(s.clone()).wrapping(text::Wrapping::None), text(s))
 }
 
-/// The new-Board name prompt's text box.
-pub(crate) fn board_name_input(name: &str) -> widget::TextInput<'_, Message> {
-    text_input("Board name", name)
-        .id(BOARD_NAME_INPUT)
-        .on_input(Message::BoardNameChanged)
-        .on_submit(Message::CreateBoard)
+/// The new-Board name prompt: its text box and Create (disabled while blank).
+pub(crate) fn board_name_input(name: &str) -> widget::Row<'_, Message> {
+    let create = (!name.trim().is_empty()).then_some(Message::CreateBoard);
+    row![
+        text_input("Board name", name)
+            .id(BOARD_NAME_INPUT)
+            .on_input(Message::BoardNameChanged)
+            .on_submit(Message::CreateBoard),
+        button("Create").on_press_maybe(create),
+    ]
+    .spacing(4)
+    .align_y(Center)
 }
 
 /// A dialog's title row with its ✕ (Esc) button sending `close`.
@@ -1740,7 +1844,8 @@ fn moved(
 }
 
 /// Where Ctrl+arrow moves the selected Card: (Card, Column, index). `None` = no Card or at an end.
-/// Up/Down go just before the previous / just after the next Card `shown` by the Filter.
+/// Up/Down go just before the previous / just after the next Card `shown` by the Filter;
+/// Left/Right go after the last shown Card of the neighbouring Column.
 fn card_move(
     board: &Board,
     selection: Selection,
@@ -1757,8 +1862,15 @@ fn card_move(
             let next = i + 1 + cards[i + 1..].iter().position(&shown)?;
             Some((card, column.id, next))
         }
-        Direction::Left => Some((card, board.columns.get(ci.checked_sub(1)?)?.id, usize::MAX)),
-        Direction::Right => Some((card, board.columns.get(ci + 1)?.id, usize::MAX)),
+        Direction::Left | Direction::Right => {
+            let next = match direction {
+                Direction::Left => board.columns.get(ci.checked_sub(1)?)?,
+                _ => board.columns.get(ci + 1)?,
+            };
+            // After the last visible Card, as a drop on the Column body (the bottom unfiltered).
+            let at = filter::placement(&next.cards, next.cards.len(), &shown);
+            Some((card, next.id, at))
+        }
     }
 }
 

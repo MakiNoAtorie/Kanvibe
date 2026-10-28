@@ -374,14 +374,14 @@ fn permanent_delete_asks_first_and_esc_cancels() {
 }
 
 #[test]
-fn the_confirmation_names_the_card() {
+fn the_confirmation_names_the_card_and_says_it_can_be_undone() {
     let mut app = app_with_cards();
     let a = card(&app, "A");
     send(&mut app, [Message::ArchiveCard(a), Message::AskDelete(a)]);
     let board = &app.data.boards[0];
     assert_eq!(
         archive::delete_question(board, a).as_deref(),
-        Some("Permanently delete \"A\"?")
+        Some("Permanently delete \"A\"? You can undo this until Kanvibe closes.")
     );
 }
 
@@ -465,4 +465,13 @@ fn f1_still_opens_the_shortcuts_in_the_archive_view() {
     send(&mut app, [Message::OpenArchive]);
     send(&mut app, [Message::KeyWithFocus(press(Named::F1), None)]);
     assert!(app.shortcuts, "the footer button works there too");
+}
+
+#[test]
+fn the_archive_view_is_titled_with_its_board_and_count() {
+    let mut app = app_with_cards();
+    let a = card(&app, "A");
+    send(&mut app, [Message::ArchiveCard(a), Message::OpenArchive]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("Archive of Work (1)").is_ok());
 }

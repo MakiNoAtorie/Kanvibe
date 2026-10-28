@@ -730,3 +730,43 @@ fn creating_a_board_while_a_capture_box_is_open_adds_its_card_first() {
     assert_eq!(card_titles(&app, 0), ["Half typed"]);
     assert_eq!(app.capture, None);
 }
+
+#[test]
+fn pasting_several_lines_into_the_capture_box_adds_one_card_per_line_as_one_step() {
+    let mut app = app_with_board();
+    let todo = column_id(&app, 0);
+    capture(&mut app, todo, &["Old"]);
+    send(
+        &mut app,
+        [
+            Message::CaptureChanged("typed".into()),
+            Message::CaptureLines(Some("a\r\n b \n\n  \nc\n".into())),
+        ],
+    );
+    assert_eq!(card_titles(&app, 0), ["Old", "a", "b", "c"]);
+    assert_eq!(app.capture.as_ref().map(|c| c.text.as_str()), Some(""));
+    let c = app.data.boards[0].columns[0].cards[3].id;
+    assert_eq!(app.selection.and_then(|s| s.card), Some(c));
+    send(&mut app, [Message::Escape, Message::Undo]);
+    assert_eq!(card_titles(&app, 0), ["Old"]);
+    // One line: the box already holds it; nothing else happens.
+    send(
+        &mut app,
+        [
+            Message::OpenCapture(todo),
+            Message::CaptureChanged("one".into()),
+            Message::CaptureLines(Some("one\n".into())),
+        ],
+    );
+    assert_eq!(card_titles(&app, 0), ["Old"]);
+    assert_eq!(app.capture.as_ref().map(|c| c.text.as_str()), Some("one"));
+}
+
+#[test]
+fn the_capture_box_placeholder_states_enter_and_esc() {
+    let mut app = app_with_board();
+    let todo = column_id(&app, 0);
+    send(&mut app, [Message::OpenCapture(todo)]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("Card title (Enter adds, Esc cancels)").is_ok());
+}

@@ -263,3 +263,38 @@ fn markup_without_selection_puts_the_cursor_between_the_markers() {
         assert_eq!(description(&app, card), expected);
     }
 }
+
+#[test]
+fn a_whitespace_only_description_is_stored_as_none() {
+    let (mut app, card) = app_with_panel();
+    let old = "2020-01-01T00:00:00Z";
+    app.data.boards[0].columns[0].cards[0].updated = old.into();
+    app.history = Default::default();
+    // From empty: nothing changes, not even the Card's time.
+    send(&mut app, [Message::EditDescription]);
+    type_text(&mut app, "  ");
+    send(&mut app, [edit(text_editor::Edit::Enter)]);
+    type_text(&mut app, " ");
+    send(&mut app, [Message::CommitEdit]);
+    assert_eq!(description(&app, card), "");
+    assert_eq!(app.data.card(card).unwrap().updated, old);
+    // From text: blanking it is a change.
+    send(&mut app, [Message::EditDescription]);
+    type_text(&mut app, "x");
+    send(&mut app, [Message::CommitEdit]);
+    app.data.boards[0].columns[0].cards[0].updated = old.into();
+    send(&mut app, [Message::EditDescription]);
+    send(
+        &mut app,
+        [
+            Message::DescriptionAction(text_editor::Action::SelectAll),
+            edit(text_editor::Edit::Insert(' ')),
+            Message::CommitEdit,
+        ],
+    );
+    assert_eq!(description(&app, card), "");
+    assert_ne!(app.data.card(card).unwrap().updated, old);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("No description").is_ok());
+    assert!(ui.find("≡").is_err());
+}

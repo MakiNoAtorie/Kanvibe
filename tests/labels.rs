@@ -104,6 +104,32 @@ fn new_label(app: &mut App, name: &str) {
     );
 }
 
+/// [`new_label`], then the Label is taken off the Card again (outside history, timestamps
+/// kept), for tests about Labels that start on no Card.
+fn new_free_label(app: &mut App, name: &str) {
+    let before = app.data.clone();
+    new_label(app, name);
+    let Some(id) = app.data.boards[0]
+        .labels
+        .iter()
+        .find(|l| l.name == name.trim())
+        .map(|l| l.id)
+    else {
+        return;
+    };
+    let old = before.boards[0].columns.iter().flat_map(|c| &c.cards);
+    for card in app.data.boards[0]
+        .columns
+        .iter_mut()
+        .flat_map(|c| &mut c.cards)
+    {
+        card.labels.retain(|l| *l != id);
+        if let Some(was) = old.clone().find(|c| c.id == card.id) {
+            card.updated = was.updated.clone();
+        }
+    }
+}
+
 fn on_card(app: &App, title: &str) -> Vec<String> {
     let card = app.data.card(card(app, title)).unwrap();
     app.data
@@ -159,7 +185,7 @@ fn a_clashing_name_is_refused_on_create_and_the_form_stays_open() {
 #[test]
 fn toggling_attaches_and_detaches_one_undo_step_each_and_touches_the_card() {
     let mut app = app_with_cards();
-    new_label(&mut app, "Bug");
+    new_free_label(&mut app, "Bug");
     let bug = label(&app, "Bug");
     send(&mut app, [Message::ToggleLabel(bug)]);
     assert_eq!(on_card(&app, "A"), ["Bug"]);
@@ -171,14 +197,13 @@ fn toggling_attaches_and_detaches_one_undo_step_each_and_touches_the_card() {
     assert_eq!(on_card(&app, "A"), ["Bug"]);
     send(&mut app, [Message::Undo]);
     assert!(on_card(&app, "A").is_empty());
-    assert_eq!(names(&app), ["Bug"]); // the Label itself is a separate step
 }
 
 #[test]
 fn a_cards_labels_come_in_board_label_order() {
     let mut app = app_with_cards();
     for name in ["Bug", "Idea", "Chore"] {
-        new_label(&mut app, name);
+        new_free_label(&mut app, name);
     }
     let (bug, idea, chore) = (
         label(&app, "Bug"),
@@ -286,7 +311,7 @@ fn recolour_stores_the_palette_key_and_is_one_undo_step() {
 #[test]
 fn deleting_an_unused_label_needs_no_prompt() {
     let mut app = app_with_cards();
-    new_label(&mut app, "Bug");
+    new_free_label(&mut app, "Bug");
     let bug = label(&app, "Bug");
     send(&mut app, [Message::DeleteLabel(bug)]);
     assert!(names(&app).is_empty());
@@ -298,7 +323,7 @@ fn deleting_an_unused_label_needs_no_prompt() {
 #[test]
 fn deleting_an_in_use_label_asks_with_the_count_then_strips_every_card() {
     let mut app = app_with_cards();
-    new_label(&mut app, "Bug");
+    new_free_label(&mut app, "Bug");
     let bug = label(&app, "Bug");
     send(&mut app, [Message::ToggleLabel(bug)]);
     let b = card(&app, "B");
@@ -344,7 +369,7 @@ fn deleting_an_in_use_label_asks_with_the_count_then_strips_every_card() {
 #[test]
 fn an_archived_card_counts_toward_the_label_and_is_stripped_and_touched_on_delete() {
     let mut app = app_with_cards();
-    new_label(&mut app, "Bug");
+    new_free_label(&mut app, "Bug");
     let bug = label(&app, "Bug");
     let a = card(&app, "A");
     send(
@@ -368,7 +393,7 @@ fn an_archived_card_counts_toward_the_label_and_is_stripped_and_touched_on_delet
 #[test]
 fn the_prompt_uses_the_singular_for_one_card_and_cancel_keeps_the_label() {
     let mut app = app_with_cards();
-    new_label(&mut app, "Bug");
+    new_free_label(&mut app, "Bug");
     let bug = label(&app, "Bug");
     send(
         &mut app,
@@ -386,7 +411,7 @@ fn the_prompt_uses_the_singular_for_one_card_and_cancel_keeps_the_label() {
 #[test]
 fn escape_backs_out_confirm_then_picker_then_panel() {
     let mut app = app_with_cards();
-    new_label(&mut app, "Bug");
+    new_free_label(&mut app, "Bug");
     let bug = label(&app, "Bug");
     send(
         &mut app,
@@ -403,7 +428,7 @@ fn escape_backs_out_confirm_then_picker_then_panel() {
 }
 
 #[test]
-fn l_opens_the_picker_only_with_the_panel_open() {
+fn l_opens_the_picker_only_with_a_card_open_or_selected() {
     let press = |app: &mut App| {
         let event = keyboard::Event::KeyPressed {
             key: Key::Character("l".into()),
@@ -420,6 +445,7 @@ fn l_opens_the_picker_only_with_the_panel_open() {
     };
     let mut app = app_with_cards();
     app.panel = None;
+    app.selection = None;
     press(&mut app);
     assert!(app.label_picker.is_none());
     let a = card(&app, "A");
@@ -460,11 +486,11 @@ fn the_picker_closes_when_the_panel_closes_or_follows_another_card() {
 }
 
 #[test]
-fn chips_cut_names_at_12_characters() {
+fn chips_cut_names_past_12_characters_with_an_ellipsis() {
     assert_eq!(labels::chip_text("Short"), "Short");
     assert_eq!(labels::chip_text("123456789012"), "123456789012");
-    assert_eq!(labels::chip_text("1234567890123"), "123456789012");
-    assert_eq!(labels::chip_text("ééééééééééééé"), "éééééééééééé");
+    assert_eq!(labels::chip_text("1234567890123"), "12345678901…");
+    assert_eq!(labels::chip_text("ééééééééééééé"), "ééééééééééé…");
 }
 
 #[test]
@@ -508,4 +534,31 @@ fn files_without_labels_still_load() {
     let (data, _) = storage::load(dir.path()).unwrap().unwrap();
     assert!(data.boards[0].labels.is_empty());
     assert!(data.boards[0].columns[0].cards[0].labels.is_empty());
+}
+
+#[test]
+fn a_label_created_in_the_picker_goes_on_its_card_in_the_same_undo_step() {
+    let mut app = app_with_cards();
+    new_label(&mut app, "Bug");
+    assert_eq!(on_card(&app, "A"), ["Bug"]);
+    assert!(on_card(&app, "B").is_empty());
+    assert_ne!(updated(&app, "A"), OLD);
+    send(&mut app, [Message::Undo]);
+    assert!(names(&app).is_empty());
+    assert!(on_card(&app, "A").is_empty());
+}
+
+#[test]
+fn a_card_without_labels_offers_to_add_one_in_the_panel() {
+    let mut app = app_with_cards();
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("+ Add Label").is_ok());
+    assert!(ui.find("None").is_err());
+    drop(ui);
+    new_label(&mut app, "Bug");
+    assert!(
+        iced_test::simulator(app.view())
+            .find("+ Add Label")
+            .is_err()
+    );
 }

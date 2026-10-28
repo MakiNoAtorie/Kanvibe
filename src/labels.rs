@@ -39,9 +39,12 @@ pub fn swatch(key: &str) -> Color {
         .map_or(PALETTE[0].1, |(_, c)| *c)
 }
 
-/// A chip's text: the Label name cut at 12 characters.
+/// A chip's text: the Label name; past 12 characters, its first 11 and "…".
 pub fn chip_text(name: &str) -> String {
-    name.chars().take(12).collect()
+    match name.chars().nth(12) {
+        Some(_) => name.chars().take(11).chain(['…']).collect(),
+        None => name.into(),
+    }
 }
 
 /// "Delete Label "X"? It is on N Cards." for a Label on at least one Card; `None` otherwise.
@@ -211,7 +214,7 @@ impl App {
         let card = self.label_picker.as_ref().map(|p| p.card);
         match message {
             Message::OpenLabels => {
-                if let Some(card) = self.panel {
+                if let Some(card) = self.open_panel() {
                     self.label_picker = Some(LabelPicker {
                         card,
                         expanded: None,
@@ -278,9 +281,11 @@ impl App {
                 let new = self.label_picker.as_ref().and_then(|p| p.new.clone());
                 let board = card.and_then(|card| self.data.board_of_card(card));
                 if let Some((new, board)) = new.zip(board)
-                    && self.data.add_label(board, &new.text, &new.color).is_some()
+                    && let Some(label) = self.data.add_label(board, &new.text, &new.color)
                 {
                     self.label_picker.as_mut().expect("open").new = None;
+                    // Created from this Card's picker: it goes on the Card, same step.
+                    card.map(|card| self.data.toggle_label(card, label));
                     self.record_step(Some(board));
                 }
             }
@@ -324,7 +329,7 @@ impl App {
             Some(board) => chips(board, card),
             None => None,
         };
-        let shown: Element<_> = chips.unwrap_or_else(|| text("None").size(12).into());
+        let shown: Element<_> = chips.unwrap_or_else(|| text("+ Add Label").size(12).into());
         row![
             text("Labels").size(12),
             crate::chrome::tip(
@@ -376,11 +381,12 @@ impl App {
             let Some(picker) = editing else {
                 return line.into();
             };
-            line = line.push(
+            line = line.push(crate::chrome::tip(
                 button("✎")
                     .style(button::text)
                     .on_press(Message::EditLabel(id)),
-            );
+                "Rename or recolour",
+            ));
             if picker.expanded != Some(id) {
                 return line.into();
             }

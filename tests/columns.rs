@@ -190,3 +190,52 @@ fn undo_that_removes_a_column_closes_its_menu_and_limit_prompt() {
     undo(&mut app);
     assert_eq!(app.column_menu, None, "its Column is gone");
 }
+
+#[test]
+fn a_refused_limit_says_why_until_the_text_changes() {
+    const WHY: &str = "Enter a whole number of 1 or more, or leave blank to remove";
+    let mut app = app_with_board();
+    let to_do = column_id(&app, 0);
+    send(&mut app, [Message::OpenLimit(to_do)]);
+    assert!(iced_test::simulator(app.view()).find(WHY).is_err());
+    send(
+        &mut app,
+        [Message::LimitChanged("0".into()), Message::SubmitLimit],
+    );
+    assert!(app.limit_input.as_ref().unwrap().refused);
+    assert!(iced_test::simulator(app.view()).find(WHY).is_ok());
+    send(&mut app, [Message::LimitChanged("3".into())]);
+    assert!(!app.limit_input.as_ref().unwrap().refused);
+}
+
+#[test]
+fn the_count_explains_the_column_limit() {
+    let mut app = app_with_board();
+    let to_do = column_id(&app, 0);
+    let tip = |app: &App| app.data.boards[0].columns[0].limit_tip();
+    assert_eq!(tip(&app), None);
+    set_limit(&mut app, to_do, "1");
+    assert_eq!(tip(&app).as_deref(), Some("Column Limit 1"));
+    for title in ["A", "B"] {
+        app.data.add_card(to_do, title);
+    }
+    assert_eq!(tip(&app).as_deref(), Some("Over the Column Limit (2 of 1)"));
+}
+
+#[test]
+fn the_column_menu_offers_rename() {
+    use kanvibe::app::Field;
+    let mut app = app_with_board();
+    let to_do = column_id(&app, 0);
+    send(&mut app, [Message::ToggleColumnMenu(to_do)]);
+    let mut ui = iced_test::simulator(app.view());
+    ui.click("Rename").expect("a Rename item");
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert!(messages.contains(&Message::StartEdit(Field::ColumnName(to_do))));
+    send(&mut app, messages);
+    assert_eq!(app.column_menu, None);
+    assert_eq!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(Field::ColumnName(to_do))
+    );
+}

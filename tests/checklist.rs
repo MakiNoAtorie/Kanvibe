@@ -273,3 +273,25 @@ fn the_checklist_is_saved_and_loaded() {
     assert_eq!(loaded, app.data);
     assert!(loaded.card(card).unwrap().checklist[0].done);
 }
+
+#[test]
+fn the_checklist_uses_the_glossary_words() {
+    let (mut app, _) = app_with_card();
+    send(&mut app, [Message::OpenPanel]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("+ Add Checklist Item").is_ok());
+    assert!(ui.find("+ Add item").is_err());
+}
+
+#[test]
+fn checklist_progress_shows_in_the_panel_heading_and_on_the_card() {
+    let (mut app, card) = app_with_card();
+    send(&mut app, [Message::OpenPanel]);
+    let first = add(&mut app, card, "One");
+    add(&mut app, card, "Two");
+    add(&mut app, card, "Three");
+    send(&mut app, [Message::ToggleItem(first)]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(ui.find("Checklist 1/3").is_ok());
+    assert!(ui.find("☑ 1/3").is_ok());
+}

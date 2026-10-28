@@ -534,9 +534,10 @@ fn each_load_class_reaches_its_screen() {
     assert!(matches!(problem(&screen).unwrap().error, LoadError::Io(_)));
 
     fs::remove_dir(dir.join("kanvibe.json")).unwrap();
-    storage::save(&dir, &sample(), &Settings::default()).unwrap();
+    let data = sample(); // one sample: its timestamps differ across a second boundary
+    storage::save(&dir, &data, &Settings::default()).unwrap();
     let _ = screen.update(startup::Message::Retry);
-    assert_eq!(opened(screen).data, sample(), "Retry loads again");
+    assert_eq!(opened(screen).data, data, "Retry loads again");
 }
 
 #[test]
@@ -1000,4 +1001,31 @@ fn an_unreadable_bak1_is_replaced_without_pushing_the_good_bak2_out() {
         bak2,
         "the readable backup is kept"
     );
+}
+
+#[test]
+fn the_not_saved_bar_has_a_retry_button() {
+    let mut app = App {
+        not_saved: Some("Not saved: x: denied".into()),
+        ..Default::default()
+    };
+    let _ = app.update(Message::NewBoard);
+    let mut ui = iced_test::simulator(app.view());
+    ui.click("Retry now").expect("a Retry now button");
+    let retry = ui.into_messages().any(|m| m == Message::RetrySave);
+    assert!(retry);
+}
+
+#[test]
+fn the_window_title_names_the_current_board() {
+    let mut app = App::default();
+    assert_eq!(Screen::App(App::default()).title(), "Kanvibe");
+    for message in [
+        Message::NewBoard,
+        Message::BoardNameChanged("Work".into()),
+        Message::CreateBoard,
+    ] {
+        let _ = app.update(message);
+    }
+    assert_eq!(Screen::App(app).title(), "Work – Kanvibe");
 }

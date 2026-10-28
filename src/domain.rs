@@ -66,6 +66,15 @@ impl Column {
         self.limit.is_some_and(|l| self.cards.len() > l as usize)
     }
 
+    /// The header count's tooltip: what the Column Limit is, and whether it is exceeded.
+    pub fn limit_tip(&self) -> Option<String> {
+        let limit = self.limit?;
+        Some(match self.over_limit() {
+            true => format!("Over the Column Limit ({} of {limit})", self.cards.len()),
+            false => format!("Column Limit {limit}"),
+        })
+    }
+
     /// The header count: "n", or "n/limit" with a Column Limit.
     pub fn count_label(&self) -> String {
         match self.limit {

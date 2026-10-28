@@ -142,6 +142,7 @@ impl App {
     pub(crate) fn update_transfer(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::ExportBoard(id) => {
+                self.commit_pending(); // a Card being typed goes into the export
                 self.board_menu = false;
                 // Archived Boards can't be exported: restore first.
                 let Some(board) = self.data.active_board(id).cloned() else {

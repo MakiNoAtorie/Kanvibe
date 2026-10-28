@@ -49,6 +49,7 @@ impl App {
         } else {
             scrollable(column(rows)).into()
         };
-        dialog(container(column![header, list].spacing(12)).width(320))
+        let hint = text("The Card goes to the bottom of the Board's first Column.").size(12);
+        dialog(container(column![header, hint, list].spacing(12)).width(320))
     }
 }

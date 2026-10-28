@@ -48,7 +48,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         })
         .chain([gap(active.len(), space().height(12).into())]);
     let archived_section = (!archived.is_empty()).then(|| {
-        let heading = button(text(format!("Archived ({})", archived.len())))
+        let chevron = if app.archived_open { "▾" } else { "▸" };
+        let heading = button(text(format!("Archived ({}) {chevron}", archived.len())))
             .style(button::text)
             .on_press(Message::ToggleArchivedBoards);
         let rows = archived.iter().filter(|_| app.archived_open).map(|b| {
