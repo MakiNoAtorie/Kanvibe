@@ -332,3 +332,15 @@ fn undo_shows_the_source_board_and_redo_the_target() {
     assert_eq!(app.current_board, Some(dst));
     assert_eq!(first_column(&app, "Dst"), ["X", "A"]);
 }
+
+#[test]
+fn the_picker_says_where_the_card_goes() {
+    let mut app = app_with_two_boards();
+    select(&mut app, "A");
+    send(&mut app, [Message::OpenMove]);
+    let mut ui = iced_test::simulator(app.view());
+    assert!(
+        ui.find("The Card goes to the bottom of the Board's first Column.")
+            .is_ok()
+    );
+}
