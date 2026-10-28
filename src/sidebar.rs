@@ -146,7 +146,7 @@ fn drop_row<'a>(row: Element<'a, Message>, board: Id, drag: &Drag) -> Element<'a
 
 fn small(label: &str, message: Message) -> Element<'_, Message> {
     button(text(label).size(12))
-        .style(button::secondary)
+        .style(crate::app::quiet)
         .padding([2, 6])
         .on_press(message)
         .into()

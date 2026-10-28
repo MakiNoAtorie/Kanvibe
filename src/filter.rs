@@ -140,7 +140,7 @@ impl App {
         .extend(clear)
         .push(
             button(text(labels).wrapping(text::Wrapping::None))
-                .style(button::secondary)
+                .style(crate::app::quiet)
                 .on_press(Message::ToggleFilterMenu),
         )
         .spacing(4)

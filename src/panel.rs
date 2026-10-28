@@ -49,13 +49,13 @@ impl App {
                 row![
                     tip(
                         button("Move to Board…")
-                            .style(button::secondary)
+                            .style(crate::app::quiet)
                             .on_press(Message::OpenMove),
                         "Move to Board (M)"
                     ),
                     tip(
                         button("Archive Card")
-                            .style(button::secondary)
+                            .style(crate::app::quiet)
                             .on_press(Message::ArchiveCard(card.id)),
                         "Archive Card (Del)"
                     ),

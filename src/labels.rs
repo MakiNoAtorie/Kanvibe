@@ -432,7 +432,7 @@ impl App {
     ) -> Element<'a, Message> {
         let Some(new) = &picker.new else {
             return button("+ New Label")
-                .style(button::secondary)
+                .style(crate::app::quiet)
                 .on_press(Message::NewLabel)
                 .into();
         };

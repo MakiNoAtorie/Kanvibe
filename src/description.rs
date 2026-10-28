@@ -107,7 +107,7 @@ impl App {
         }
         let edit = crate::chrome::tip(
             button("Edit")
-                .style(button::secondary)
+                .style(crate::app::quiet)
                 .on_press(Message::EditDescription),
             "Edit description (E)",
         );

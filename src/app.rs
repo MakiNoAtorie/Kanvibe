@@ -1339,7 +1339,7 @@ impl App {
                     row![
                         text(error).width(Fill),
                         button("Retry now")
-                            .style(button::secondary)
+                            .style(quiet)
                             .on_press_maybe(self.writing.is_none().then_some(Message::RetrySave)),
                     ]
                     .spacing(8)
@@ -1414,7 +1414,7 @@ impl App {
         columns.extend([
             gap(board.columns.len()),
             button("+ Add Column")
-                .style(button::secondary)
+                .style(quiet)
                 .on_press(Message::AddColumn(board.id))
                 .into(),
         ]);
@@ -1423,7 +1423,7 @@ impl App {
             text(format!("Archive ({})", board.archived_cards.len()))
                 .wrapping(text::Wrapping::None),
         )
-        .style(button::secondary)
+        .style(quiet)
         .on_press(Message::OpenArchive);
         let menu_button = crate::chrome::tip(
             button("⋯")
@@ -1449,19 +1449,19 @@ impl App {
         let menu = self.board_menu.then(|| {
             row![
                 button("Rename")
-                    .style(button::secondary)
+                    .style(quiet)
                     .on_press(Message::StartEdit(Field::BoardName(board.id))),
                 button("Export Board…")
-                    .style(button::secondary)
+                    .style(quiet)
                     .on_press(Message::ExportBoard(board.id)),
                 button(match self.saving_image {
                     true => "Saving image…",
                     false => "Save as image…",
                 })
-                .style(button::secondary)
+                .style(quiet)
                 .on_press_maybe((!self.saving_image).then_some(Message::SaveImage(board.id))),
                 button("Archive Board")
-                    .style(button::secondary)
+                    .style(quiet)
                     .on_press(Message::ArchiveBoard(board.id)),
             ]
             .spacing(8)
@@ -1590,13 +1590,13 @@ impl App {
             _ if self.column_menu == Some(col.id) => Some(
                 column![
                     button("Rename")
-                        .style(button::secondary)
+                        .style(quiet)
                         .on_press(Message::StartEdit(Field::ColumnName(col.id))),
                     button("Set limit…")
-                        .style(button::secondary)
+                        .style(quiet)
                         .on_press(Message::OpenLimit(col.id)),
                     button(text(crate::archive::remove_column_text(col)))
-                        .style(button::secondary)
+                        .style(quiet)
                         .on_press(Message::RemoveColumn(col.id)),
                 ]
                 .spacing(4)
@@ -1675,9 +1675,7 @@ pub(crate) fn card_face<'a>(
 /// A confirmation: the question, Cancel (as Esc) and the confirm button.
 fn view_confirm(confirm: &Confirm) -> Element<'_, Message> {
     let buttons = row![
-        button("Cancel")
-            .style(button::secondary)
-            .on_press(Message::Escape),
+        button("Cancel").style(quiet).on_press(Message::Escape),
         button("Delete")
             .style(button::danger)
             .on_press(Message::Confirm),
@@ -1793,6 +1791,37 @@ fn reveal(scrollable: widget::Id, child: widget::Id, horizontal: bool) -> Task<M
             })
         })
     })
+}
+
+/// The secondary button: weakest background, 1px strong border, weak background on hover.
+pub(crate) fn quiet(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let base = button::Style {
+        background: Some(palette.background.weakest.color.into()),
+        text_color: palette.background.weakest.text,
+        border: iced::Border {
+            color: palette.background.strong.color,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    };
+    match status {
+        button::Status::Active => base,
+        button::Status::Hovered | button::Status::Pressed => button::Style {
+            background: Some(palette.background.weak.color.into()),
+            ..base
+        },
+        // As iced's own disabled buttons: everything at half strength.
+        button::Status::Disabled => button::Style {
+            background: Some(palette.background.weakest.color.scale_alpha(0.5).into()),
+            text_color: base.text_color.scale_alpha(0.5),
+            border: base
+                .border
+                .color(palette.background.strong.color.scale_alpha(0.5)),
+            ..base
+        },
+    }
 }
 
 /// `base`, with a 2px primary-colour border when `selected`.
