@@ -1014,3 +1014,17 @@ fn the_not_saved_bar_has_a_retry_button() {
     let retry = ui.into_messages().any(|m| m == Message::RetrySave);
     assert!(retry);
 }
+
+#[test]
+fn the_window_title_names_the_current_board() {
+    let mut app = App::default();
+    assert_eq!(Screen::App(App::default()).title(), "Kanvibe");
+    for message in [
+        Message::NewBoard,
+        Message::BoardNameChanged("Work".into()),
+        Message::CreateBoard,
+    ] {
+        let _ = app.update(message);
+    }
+    assert_eq!(Screen::App(app).title(), "Work – Kanvibe");
+}
