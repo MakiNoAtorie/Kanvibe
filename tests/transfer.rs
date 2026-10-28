@@ -162,6 +162,19 @@ fn export_round_trips_through_import_into_an_equivalent_board_with_fresh_ids() {
 }
 
 #[test]
+fn export_and_import_carry_a_collapsed_column() {
+    let mut app = app_with_work();
+    let doing = app.data.boards[0].columns[1].id;
+    app.data.toggle_collapse(doing);
+    let bytes = export(&app.data.boards[0]);
+
+    import(&mut app, &bytes);
+
+    let folds = |b: &Board| b.columns.iter().map(|c| c.collapsed).collect::<Vec<_>>();
+    assert_eq!(folds(&app.data.boards[1]), [false, true, false]);
+}
+
+#[test]
 fn export_file_name_replaces_illegal_characters_and_trims_trailing_dots_and_spaces() {
     assert_eq!(file_name("Work"), "Work.kanvibe.json");
     assert_eq!(

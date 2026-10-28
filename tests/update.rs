@@ -513,8 +513,14 @@ fn ctrl_left_and_right_move_the_selected_column_when_no_card_is_selected() {
     let to_do = column_id(&app, 0);
     app.selection = selected(&app, 0, None);
 
+    let history = format!("{:?}", app.history);
     send(&mut app, [key(Named::ArrowLeft, true)]); // first Column: no-op, no step
     assert_eq!(column_names(&app), ["To do", "Doing", "Done"]);
+    assert_eq!(
+        format!("{:?}", app.history),
+        history,
+        "no step at the left edge"
+    );
 
     send(&mut app, [key(Named::ArrowRight, true)]);
     assert_eq!(column_names(&app), ["Doing", "To do", "Done"]);
@@ -525,8 +531,14 @@ fn ctrl_left_and_right_move_the_selected_column_when_no_card_is_selected() {
     assert_eq!(app.selection, on_to_do);
 
     send(&mut app, [key(Named::ArrowRight, true)]);
+    let history = format!("{:?}", app.history);
     send(&mut app, [key(Named::ArrowRight, true)]); // last Column: no-op, no step
     assert_eq!(column_names(&app), ["Doing", "Done", "To do"]);
+    assert_eq!(
+        format!("{:?}", app.history),
+        history,
+        "no step at the right edge"
+    );
     assert_eq!(app.selection, on_to_do);
 
     send(&mut app, [ctrl("z", false)]); // one step per move

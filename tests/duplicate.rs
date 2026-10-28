@@ -87,6 +87,21 @@ fn duplicate_inserts_an_unticked_copy_after_the_original_and_selects_it() {
 }
 
 #[test]
+fn the_copy_keeps_the_due_date_and_files() {
+    let mut app = app_with_cards();
+    let b = &mut app.data.boards[0].columns[0].cards[1];
+    b.due = Some("2026-10-28".into());
+    b.files = vec!["C:\\notes.txt".into(), "C:\\plan.pdf".into()];
+    select(&mut app, Some(1));
+
+    send(&mut app, [Message::DuplicateCard]);
+
+    let copy = &app.data.boards[0].columns[0].cards[2];
+    assert_eq!(copy.due.as_deref(), Some("2026-10-28"));
+    assert_eq!(copy.files, ["C:\\notes.txt", "C:\\plan.pdf"]);
+}
+
+#[test]
 fn duplicating_the_open_card_keeps_the_copy_open() {
     let mut app = app_with_cards();
     select(&mut app, Some(1));
