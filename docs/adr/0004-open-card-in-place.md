@@ -1,0 +1,3 @@
+# The open Card expands in place
+
+A Card's fields (Labels, description, Checklist, actions, times) show by expanding the selected Card in place inside its Column, instead of in a 400px panel on the right or in a modal. The panel squeezed the Board on every open while mostly showing empty space, and a modal would hide the Board that gives the Card its context; in place, the Board keeps its full width and the arrow keys still walk from Card to Card with the open Card following. The cost we accepted: a 280px Column is narrow for long descriptions and wide Checklists. If that proves cramped, the follow-up is to widen the open Card's Column while it is open, not to bring back the panel.

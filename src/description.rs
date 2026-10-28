@@ -73,18 +73,6 @@ pub(crate) fn face_icon<'a>(card: &Card) -> Option<Element<'a, Message>> {
     (!card.description.is_empty()).then(|| text("≡").style(text::secondary).into())
 }
 
-/// The description under a Card face's title box: its first lines, or where Tab goes.
-pub(crate) fn face_preview<'a>(card: &Card) -> Element<'a, Message> {
-    let preview = match card.description.is_empty() {
-        true => "Description (Tab)".to_owned(),
-        false => card.description.lines().take(3).collect::<Vec<_>>().join(
-            "
-",
-        ),
-    };
-    text(preview).size(13).style(text::secondary).into()
-}
-
 /// iced's Markdown style with inline code on the weak background in the theme's text colour,
 /// instead of a black box (loud in the light theme).
 fn markdown_settings(theme: &iced::Theme) -> markdown::Settings {
@@ -103,14 +91,14 @@ impl App {
     /// Re-parses the open Card's description for the rendered view when it changed.
     /// Runs after every `update`.
     pub(crate) fn refresh_rendered(&mut self) {
-        let source = self.panel.and_then(|c| self.data.description(c));
+        let source = self.open_card().and_then(|c| self.data.description(c));
         let source = source.unwrap_or_default();
         if self.rendered.0 != source {
             self.rendered = (source.to_owned(), markdown::Content::parse(source));
         }
     }
 
-    /// The panel's description: rendered with an Edit button, or the highlighted editor.
+    /// The open Card's description: rendered with an Edit button, or the highlighted editor.
     pub(crate) fn view_description<'a>(&'a self, card: &'a Card) -> Element<'a, Message> {
         let theme = self.theme();
         // The section heading, with Edit or Done at its right: the button swaps in place.
@@ -122,7 +110,6 @@ impl App {
             ]
             .align_y(Center)
         };
-        // The editor is on the Card face; the panel shows the result as it is typed.
         let editing =
             (self.editing.as_ref()).is_some_and(|e| e.field == Field::Description(card.id));
         let edit = match editing {
@@ -135,6 +122,7 @@ impl App {
             ),
         };
         let body: Element<_> = match card.description.is_empty() {
+            _ if editing => self.description_editor(120),
             true => text("No description").style(text::secondary).into(),
             false => markdown::view(self.rendered.1.items(), markdown_settings(&theme))
                 .map(Message::OpenLink),

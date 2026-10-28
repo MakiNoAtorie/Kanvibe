@@ -25,7 +25,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
         "Move the selected Card to the top / bottom",
     ),
     ("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous Board"),
-    ("Enter", "Edit the selected Card (or double-click it)"),
+    ("Enter", "Open the selected Card (or click it)"),
     ("F2", "Rename the open or selected Card"),
     (
         "Tab / Shift+Tab",
@@ -146,7 +146,7 @@ pub fn logical(x: i32, y: i32, width: u32, height: u32, scale: f32) -> Geometry 
 }
 
 /// The light theme: paper greys on a warm `#f7f7f5` page. Surfaces read from the background
-/// tiers in both themes: `weakest` is the raised surface (Columns, buttons, the Card panel),
+/// tiers in both themes: `weakest` is the raised surface (Columns, buttons),
 /// which is white here; iced's dark theme already lifts it toward the text. The other tiers
 /// come from a neutral page: iced's darkening multiplies a warm page's chroma into olive.
 static LIGHT: LazyLock<Theme> = LazyLock::new(|| {

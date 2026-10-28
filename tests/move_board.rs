@@ -155,14 +155,14 @@ fn keeps_created_description_and_checklist_and_updates_the_time() {
 }
 
 #[test]
-fn selection_moves_to_the_neighbour_and_the_panel_closes() {
+fn selection_moves_to_the_neighbour_and_the_card_closes() {
     let mut app = app_with_two_boards();
     select(&mut app, "B");
-    send(&mut app, [Message::OpenPanel]);
+    send(&mut app, [Message::OpenCard]);
     let b = card_id(&app, "B");
-    assert_eq!(app.panel, Some(b));
+    assert_eq!(app.open_card(), Some(b));
     move_to(&mut app, "B", "Dst");
-    assert_eq!(app.panel, None);
+    assert_eq!(app.open_card(), None);
     let c = card_id(&app, "C");
     assert_eq!(app.selection.and_then(|s| s.card), Some(c));
 }
@@ -171,7 +171,7 @@ fn selection_moves_to_the_neighbour_and_the_panel_closes() {
 fn m_opens_the_picker_for_the_open_card_and_choosing_moves_it() {
     let mut app = app_with_two_boards();
     select(&mut app, "A");
-    send(&mut app, [Message::OpenPanel]);
+    send(&mut app, [Message::OpenCard]);
     assert_eq!(
         press(Key::Character("m".into()), None),
         Some(Message::OpenMove)

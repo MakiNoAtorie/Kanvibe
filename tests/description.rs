@@ -13,8 +13,8 @@ fn send(app: &mut App, messages: impl IntoIterator<Item = Message>) {
     }
 }
 
-/// Board "Work" with Card "A" in To do, selected, panel open.
-fn app_with_panel() -> (App, Id) {
+/// Board "Work" with Card "A" in To do, selected and open.
+fn app_with_open_card() -> (App, Id) {
     let mut app = App::default();
     send(
         &mut app,
@@ -42,7 +42,7 @@ fn app_with_panel() -> (App, Id) {
             card: Some(card),
         })],
     );
-    assert_eq!(app.panel, Some(card));
+    assert_eq!(app.open_card(), Some(card));
     (app, card)
 }
 
@@ -69,7 +69,7 @@ fn press(c: &str) -> keyboard::Event {
 
 #[test]
 fn e_opens_the_editor_and_done_returns_to_the_rendered_view() {
-    let (mut app, _) = app_with_panel();
+    let (mut app, _) = app_with_open_card();
     let e = keys::map(&press("e"), &Context::default());
     assert_eq!(e, Some(Message::EditDescription));
 
@@ -78,7 +78,7 @@ fn e_opens_the_editor_and_done_returns_to_the_rendered_view() {
 
     send(&mut app, [Message::CommitEdit]);
     assert!(!editing_description(&app));
-    assert!(app.panel.is_some(), "Done keeps the panel open");
+    assert!(app.open_card().is_some(), "Done keeps the Card open");
 }
 
 fn type_text(app: &mut App, text: &str) {
@@ -97,7 +97,7 @@ fn description(app: &App, card: Id) -> &str {
 
 #[test]
 fn typing_writes_live_and_the_whole_edit_is_one_undo_step() {
-    let (mut app, card) = app_with_panel();
+    let (mut app, card) = app_with_open_card();
     send(&mut app, [Message::EditDescription]);
     type_text(&mut app, "Hi");
     send(&mut app, [edit(text_editor::Edit::Enter)]);
@@ -110,7 +110,10 @@ fn typing_writes_live_and_the_whole_edit_is_one_undo_step() {
 
     send(&mut app, [Message::Escape]);
     assert!(!editing_description(&app), "Esc leaves the editor");
-    assert!(app.panel.is_some(), "the first Esc only leaves the editor");
+    assert!(
+        app.open_card().is_some(),
+        "the first Esc only leaves the editor"
+    );
     assert_eq!(description(&app, card), "Hi\nthere");
 
     send(&mut app, [Message::Undo]);
@@ -121,7 +124,7 @@ fn typing_writes_live_and_the_whole_edit_is_one_undo_step() {
 
 #[test]
 fn clicking_outside_leaves_the_editor_but_not_a_rename() {
-    let (mut app, card) = app_with_panel();
+    let (mut app, card) = app_with_open_card();
     send(&mut app, [Message::EditDescription]);
     type_text(&mut app, "x");
     send(&mut app, [Message::ClickOutside]);
@@ -144,7 +147,7 @@ fn clicking_outside_leaves_the_editor_but_not_a_rename() {
 #[test]
 fn the_live_description_is_written_a_second_after_typing_stops() {
     let tmp = tempfile::tempdir().unwrap();
-    let (mut app, card) = app_with_panel();
+    let (mut app, card) = app_with_open_card();
     app.data_dir = Some(tmp.path().into());
     let saved = |app: &mut App| {
         while let Some(job) = app.save_if_changed() {
@@ -226,7 +229,7 @@ fn ctrl_b_i_k_are_editor_bindings_for_bold_italic_link() {
 
 #[test]
 fn markup_wraps_the_selection() {
-    let (mut app, card) = app_with_panel();
+    let (mut app, card) = app_with_open_card();
     send(&mut app, [Message::EditDescription]);
     type_text(&mut app, "note");
     send(
@@ -254,7 +257,7 @@ fn markup_without_selection_puts_the_cursor_between_the_markers() {
         (Markup::Italic, "*x*"),
         (Markup::Link, "[x](url)"),
     ] {
-        let (mut app, card) = app_with_panel();
+        let (mut app, card) = app_with_open_card();
         send(
             &mut app,
             [Message::EditDescription, Message::Format(markup)],
@@ -266,7 +269,7 @@ fn markup_without_selection_puts_the_cursor_between_the_markers() {
 
 #[test]
 fn a_whitespace_only_description_is_stored_as_none() {
-    let (mut app, card) = app_with_panel();
+    let (mut app, card) = app_with_open_card();
     let old = "2020-01-01T00:00:00Z";
     app.data.boards[0].columns[0].cards[0].updated = old.into();
     app.history = Default::default();

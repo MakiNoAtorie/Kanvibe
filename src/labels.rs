@@ -222,7 +222,7 @@ fn board_labels<'a>(board: &'a Board, card: Option<&Card>) -> Vec<&'a Label> {
 
 pub const NEW_INPUT: &str = "new-label";
 
-/// The Label picker for the open Card's panel. `None` in `App::label_picker` = closed.
+/// The Label picker for the open Card. `None` in `App::label_picker` = closed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabelPicker {
     pub card: Id,
@@ -244,7 +244,7 @@ impl App {
         let card = self.label_picker.as_ref().map(|p| p.card);
         match message {
             Message::OpenLabels => {
-                if let Some(card) = self.open_panel() {
+                if let Some(card) = self.open_selected() {
                     self.label_picker = Some(LabelPicker {
                         card,
                         expanded: None,
@@ -337,13 +337,13 @@ impl App {
         self.label_picker = None;
     }
 
-    /// Run after every update: the picker lives only while its Card's panel is open, and drops
+    /// Run after every update: the picker lives only while its Card is open, and drops
     /// an editor whose Label is gone.
     pub(crate) fn validate_labels(&mut self) {
         if self
             .label_picker
             .as_ref()
-            .is_some_and(|p| self.panel != Some(p.card))
+            .is_some_and(|p| self.open_card() != Some(p.card))
         {
             self.label_picker = None;
         }
@@ -353,7 +353,7 @@ impl App {
         }
     }
 
-    /// The panel's Labels row: the Card's chips (or "None"); a click opens the picker.
+    /// The open Card's Labels row: the Card's chips (or "+ Add Label"); a click opens the picker.
     pub(crate) fn labels_row<'a>(&'a self, card: &'a Card) -> Element<'a, Message> {
         let chips = match self.board() {
             Some(board) => chips(board, card),

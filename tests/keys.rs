@@ -194,7 +194,7 @@ fn send(app: &mut App, messages: impl IntoIterator<Item = Message>) {
     }
 }
 
-/// Boards "Work" (current) and "Home"; Cards "A", "B" in Work's To do; "A" selected, panel open.
+/// Boards "Work" (current) and "Home"; Cards "A", "B" in Work's To do; "A" selected and open.
 fn app_with_open_card() -> App {
     let mut app = App::default();
     for name in ["Work", "Home"] {
@@ -229,7 +229,7 @@ fn app_with_open_card() -> App {
             card,
         })],
     );
-    assert_eq!(app.panel, card);
+    assert_eq!(app.open_card(), card);
     app
 }
 
@@ -241,7 +241,7 @@ fn state(app: &App) -> String {
             &app.data,
             app.current_board,
             app.selection,
-            app.panel,
+            app.open_card(),
             &app.capture,
             &app.editing,
             &app.label_picker,

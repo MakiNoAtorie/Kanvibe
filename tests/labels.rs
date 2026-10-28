@@ -13,7 +13,7 @@ fn send(app: &mut App, messages: impl IntoIterator<Item = Message>) {
     }
 }
 
-/// Board "Work" with Cards A, B in To do; A selected with its panel open and the picker closed.
+/// Board "Work" with Cards A, B in To do; A selected with it open and the picker closed.
 /// Timestamps are `OLD`.
 fn app_with_cards() -> App {
     let mut app = App::default();
@@ -89,7 +89,7 @@ fn color(app: &App, name: &str) -> String {
         .clone()
 }
 
-/// Opens the picker on the open panel's Card and creates a Label through "+ New Label".
+/// Opens the picker on the open Card and creates a Label through "+ New Label".
 fn new_label(app: &mut App, name: &str) {
     if app.label_picker.is_none() {
         send(app, [Message::OpenLabels]);
@@ -409,7 +409,7 @@ fn the_prompt_uses_the_singular_for_one_card_and_cancel_keeps_the_label() {
 }
 
 #[test]
-fn escape_backs_out_confirm_then_picker_then_panel() {
+fn escape_backs_out_confirm_then_picker_then_the_open_card() {
     let mut app = app_with_cards();
     new_free_label(&mut app, "Bug");
     let bug = label(&app, "Bug");
@@ -422,9 +422,9 @@ fn escape_backs_out_confirm_then_picker_then_panel() {
     assert_eq!(names(&app), ["Bug"]);
     send(&mut app, [Message::Escape]);
     assert!(app.label_picker.is_none());
-    assert!(app.panel.is_some());
+    assert!(app.open_card().is_some());
     send(&mut app, [Message::Escape]);
-    assert!(app.panel.is_none());
+    assert!(app.open_card().is_none());
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn l_opens_the_picker_only_with_a_card_open_or_selected() {
         }
     };
     let mut app = app_with_cards();
-    app.panel = None;
+    app.open = false;
     app.selection = None;
     press(&mut app);
     assert!(app.label_picker.is_none());
@@ -462,9 +462,9 @@ fn l_opens_the_picker_only_with_a_card_open_or_selected() {
 }
 
 #[test]
-fn the_picker_closes_when_the_panel_closes_or_follows_another_card() {
+fn the_picker_closes_when_the_card_closes_or_follows_another_card() {
     let mut app = app_with_cards();
-    send(&mut app, [Message::OpenLabels, Message::ClosePanel]);
+    send(&mut app, [Message::OpenLabels, Message::CloseCard]);
     assert!(app.label_picker.is_none());
     let (a, b) = (card(&app, "A"), card(&app, "B"));
     let todo = app.data.boards[0].columns[0].id;
@@ -549,7 +549,7 @@ fn a_label_created_in_the_picker_goes_on_its_card_in_the_same_undo_step() {
 }
 
 #[test]
-fn a_card_without_labels_offers_to_add_one_in_the_panel() {
+fn a_card_without_labels_offers_to_add_one_in_the_open_card() {
     let mut app = app_with_cards();
     let mut ui = iced_test::simulator(app.view());
     assert!(ui.find("+ Add Label").is_ok());

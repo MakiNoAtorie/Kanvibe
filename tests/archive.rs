@@ -160,13 +160,13 @@ fn the_selection_goes_to_the_card_below_else_above_else_the_column() {
 }
 
 #[test]
-fn archiving_from_the_panel_closes_it_and_is_one_undo_step() {
+fn archiving_the_open_card_closes_it_and_is_one_undo_step() {
     let mut app = app_with_cards();
     click(&mut app, "B");
     let b = card(&app, "B");
-    assert_eq!(app.panel, Some(b));
+    assert_eq!(app.open_card(), Some(b));
     send(&mut app, [Message::ArchiveCard(b)]);
-    assert_eq!(app.panel, None);
+    assert_eq!(app.open_card(), None);
     assert_eq!(titles(&app, 0), ["A", "C"]);
 
     send(&mut app, [Message::Undo]);
@@ -223,7 +223,7 @@ fn the_menu_closes_and_the_selection_leaves_a_removed_column() {
     );
     assert_eq!(app.column_menu, None);
     assert_eq!(app.selection, None);
-    assert_eq!(app.panel, None);
+    assert_eq!(app.open_card(), None);
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn the_archive_view_opens_and_esc_or_back_leaves_it() {
     click(&mut app, "A");
     send(&mut app, [Message::OpenArchive]);
     assert_eq!(app.archive, board);
-    assert_eq!((app.panel, app.selection), (None, None));
+    assert_eq!((app.open_card(), app.selection), (None, None));
 
     send(&mut app, [Message::Escape]);
     assert_eq!(app.archive, None);
@@ -267,15 +267,15 @@ fn the_archive_view_opens_and_esc_or_back_leaves_it() {
 }
 
 #[test]
-fn esc_closes_the_archive_view_before_the_panel_and_selection() {
+fn esc_closes_the_archive_view_before_the_open_card_and_selection() {
     let mut app = app_with_cards();
     click(&mut app, "A");
     app.archive = app.current_board; // reachable by undo, a click on nothing, etc.
     send(&mut app, [Message::Escape]);
     assert_eq!(app.archive, None);
-    assert!(app.panel.is_some() && app.selection.is_some());
+    assert!(app.open_card().is_some() && app.selection.is_some());
     send(&mut app, [Message::Escape]);
-    assert_eq!(app.panel, None);
+    assert_eq!(app.open_card(), None);
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn keys_that_act_on_the_board_do_nothing_in_the_archive_view() {
     for key in [Named::Delete, Named::ArrowDown, Named::Enter] {
         send(&mut app, [Message::KeyWithFocus(press(key), None)]);
     }
-    assert_eq!((app.selection, app.panel), (None, None));
+    assert_eq!((app.selection, app.open_card()), (None, None));
     assert_eq!(titles(&app, 0), ["A", "B", "C"]);
 }
 

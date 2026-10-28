@@ -65,7 +65,7 @@ impl App {
     }
 
     /// Archives an active Card as one undo step. If it is the selected Card the selection moves
-    /// to the Card below, else above, else the Column; its panel closes.
+    /// to the Card below, else above, else the Column, closed.
     pub(crate) fn archive_card(&mut self, card: Id) {
         let board = self.data.board_of_card(card);
         if self.card_leaves(card, |data| data.archive_card(card)) {
@@ -75,7 +75,7 @@ impl App {
 
     /// Commits the pending edit, then `leave` takes the active `card` off its Board's Columns
     /// (archive, Move to Board). On success the selection moves to its neighbour (see
-    /// [`Self::selection_after_leaving`]) and its panel closes; `false` when nothing left.
+    /// [`Self::selection_after_leaving`]) and the open Card closes; `false` when nothing left.
     pub(crate) fn card_leaves(
         &mut self,
         card: Id,
@@ -86,10 +86,10 @@ impl App {
         if leave(&mut self.data).is_none() {
             return false;
         }
-        self.selection = follow.or(self.selection);
-        if self.panel == Some(card) {
-            self.panel = None;
+        if self.selection.and_then(|s| s.card) == Some(card) {
+            self.open = false; // the neighbour is selected, not opened
         }
+        self.selection = follow.or(self.selection);
         true
     }
 
@@ -131,16 +131,15 @@ impl App {
         }
     }
 
-    /// Opens the Archive view in place of the Columns; the panel, selection and menus belong to the
-    /// Columns, so they close.
+    /// Opens the Archive view in place of the Columns; the open Card, selection and menus belong
+    /// to the Columns, so they close.
     pub(crate) fn open_archive(&mut self) {
         self.commit_pending();
         self.column_menu = None;
         self.limit_input = None;
         self.board_menu = false;
         self.filter_menu = false;
-        self.panel = None;
-        self.selection = None;
+        self.selection = None; // and so the open Card closes
         self.archive = self.current_board;
     }
 

@@ -334,11 +334,11 @@ fn enter_in_the_filter_box_selects_the_first_visible_card() {
         [Message::FilterChanged("bug".into()), Message::SubmitFilter],
     );
     assert_eq!(selected(&app), Some("bug 2"));
-    assert_eq!(app.panel, None);
+    assert_eq!(app.open_card(), None);
 }
 
 #[test]
-fn esc_closes_the_panel_then_clears_the_filter_then_the_selection() {
+fn esc_closes_the_open_card_then_clears_the_filter_then_the_selection() {
     let mut app = app_with(&[&["bug 1", "x"]]);
     send(&mut app, [Message::FilterChanged("bug".into())]);
     let (todo, bug) = (column(&app, 0), id(&app, "bug 1"));
@@ -351,9 +351,9 @@ fn esc_closes_the_panel_then_clears_the_filter_then_the_selection() {
     );
     // Esc the filter box captured: it only leaves the box.
     send(&mut app, [Message::LeaveField]);
-    assert_eq!((app.panel, app.filter.is_on()), (Some(bug), true));
+    assert_eq!((app.open_card(), app.filter.is_on()), (Some(bug), true));
     send(&mut app, [Message::Escape]);
-    assert_eq!((app.panel, app.filter.is_on()), (None, true));
+    assert_eq!((app.open_card(), app.filter.is_on()), (None, true));
     send(&mut app, [Message::Escape]);
     assert!(!app.filter.is_on());
     assert_eq!(selected(&app), Some("bug 1"));

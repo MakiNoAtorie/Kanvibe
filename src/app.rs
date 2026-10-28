@@ -75,13 +75,14 @@ pub struct App {
     pub archived_open: bool,
     /// The press or drag in progress; see `drag`.
     pub drag: Option<Drag>,
-    /// The Card the Card panel shows. It follows the selected Card; see `validate_ui`.
-    pub panel: Option<Id>,
+    /// The selected Card is the open Card, expanded in place in its Column. Cleared when the
+    /// Selection has no Card; see `validate_ui`.
+    pub open: bool,
     /// Backup rotation this session; startup sets `Off` after Restore or Start empty.
     pub rotation: storage::Rotation,
     /// The Board whose Archive view replaces its Columns; `None` = the Columns show.
     pub archive: Option<Id>,
-    /// The Label picker over the open Card's panel; see `labels`.
+    /// The Label picker over the open Card; see `labels`.
     pub label_picker: Option<LabelPicker>,
     /// The "Move to Board…" picker for this Card; see `move_board`.
     pub move_picker: Option<Id>,
@@ -202,7 +203,7 @@ pub enum Field {
     CardTitle(Id),
     ChecklistItem(Id),
     LabelName(Id),
-    /// The Card's Markdown description, in the panel's description editor.
+    /// The Card's Markdown description, in the open Card's description editor.
     Description(Id),
 }
 
@@ -323,17 +324,17 @@ pub enum Message {
     DragCancel,
     /// Autoscroll timer while dragging.
     DragTick,
-    /// Open the Card panel on the selected Card.
-    OpenPanel,
+    /// Enter: open the selected Card (expand it in place).
+    OpenCard,
     /// Double-click on a Card: edit its title on the Card face.
     EditCard(Id),
-    /// The panel's X button.
-    ClosePanel,
+    /// The open Card's ✕ button.
+    CloseCard,
     /// Enter or F2: edit the open or selected Card's title.
     EditTitle,
     /// Del: archive the selected Card.
     ArchiveSelected,
-    /// The panel's "Archive Card" button.
+    /// The open Card's "Archive" button.
     ArchiveCard(Id),
     /// "Remove Column (archives N Cards)" in the Column menu.
     RemoveColumn(Id),
@@ -356,10 +357,10 @@ pub enum Message {
     /// Ctrl+Up / Ctrl+Down in the Item being edited.
     MoveEditedItem(Direction),
     RemoveItem(Id),
-    /// L, or a click on the panel's Labels row: open the Label picker.
+    /// L, or a click on the open Card's Labels row: open the Label picker.
     OpenLabels,
     CloseLabels,
-    /// M, or "Move to Board…" in the panel: open the Board picker.
+    /// M, or "Move to Board…" in the open Card: open the Board picker.
     OpenMove,
     CloseMove,
     /// A Board in the picker, or a drop on a sidebar Board: move the Card there.
@@ -391,7 +392,7 @@ pub enum Message {
     ShowShortcuts,
     /// The footer's "Open data folder".
     OpenDataFolder,
-    /// E or the panel's Edit button: open the description editor.
+    /// E or the open Card's Edit button: open the description editor.
     EditDescription,
     /// Typing, cursor moves and clicks in the description editor.
     DescriptionAction(text_editor::Action),
@@ -485,6 +486,7 @@ impl App {
             }
             Message::OpenCapture(column) => {
                 self.commit_pending();
+                self.open = false; // new Cards become selected; they shouldn't open one by one
                 self.capture = Some(Capture::new(column));
                 return focus_capture(column);
             }
@@ -528,14 +530,14 @@ impl App {
             Message::Escape if self.move_picker.is_some() => self.move_picker = None,
             Message::Escape if self.search.is_some() && !self.field_open() => self.search = None,
             Message::Escape => {
-                // One layer per press: the text field, the Archive view, the Card panel, the
+                // One layer per press: the text field, the Archive view, the open Card, the
                 // Filter, then the selection.
                 if !self.field_open()
                     && self.column_menu.is_none()
                     && !self.board_menu
                     && !self.filter_menu
                     && self.archive.take().is_none()
-                    && self.panel.take().is_none()
+                    && !std::mem::take(&mut self.open)
                     && !self.clear_filter()
                 {
                     self.selection = None;
@@ -561,21 +563,20 @@ impl App {
             Message::Select(selection) => {
                 self.commit_pending();
                 self.selection = Some(selection);
-                if selection.card.is_some() {
-                    self.panel = selection.card; // clicking a Card opens or switches the panel
-                }
+                self.open |= selection.card.is_some(); // clicking a Card opens it
                 return self.reveal_selection();
             }
-            Message::OpenPanel => {
+            Message::OpenCard => {
                 self.commit_pending();
-                self.open_panel();
+                self.open_selected();
+                return self.reveal_selection(); // the whole open Card, footer included
             }
-            Message::ClosePanel => {
+            Message::CloseCard => {
                 self.commit_pending();
-                self.panel = None;
+                self.open = false;
             }
             Message::EditDescription => {
-                if let Some(card) = self.open_panel() {
+                if let Some(card) = self.open_selected() {
                     return self.update(Message::StartEdit(Field::Description(card)));
                 }
             }
@@ -596,7 +597,7 @@ impl App {
                 return self.update(Message::StartEdit(Field::CardTitle(card)));
             }
             Message::EditTitle => {
-                if let Some(card) = self.open_panel() {
+                if let Some(card) = self.open_selected() {
                     return self.update(Message::StartEdit(Field::CardTitle(card)));
                 }
             }
@@ -807,6 +808,7 @@ impl App {
                     {
                         let card = Some(card);
                         self.selection = Some(Selection { column, card });
+                        self.open = true;
                         return Task::batch([operation::focus(focus), self.reveal_selection()]);
                     }
                     return operation::focus(focus);
@@ -1120,10 +1122,16 @@ impl App {
         focus_capture(column)
     }
 
-    /// Shows the selected Card in the panel (else keeps the open one) and returns it.
-    pub(crate) fn open_panel(&mut self) -> Option<Id> {
-        self.panel = self.selection.and_then(|s| s.card).or(self.panel);
-        self.panel
+    /// Opens the selected Card, if any, and returns it.
+    pub(crate) fn open_selected(&mut self) -> Option<Id> {
+        let card = self.selection.and_then(|s| s.card);
+        self.open |= card.is_some();
+        card
+    }
+
+    /// The open Card: the selected Card while `open` is set.
+    pub fn open_card(&self) -> Option<Id> {
+        self.selection.and_then(|s| s.card).filter(|_| self.open)
     }
 
     /// Records an undo step (if anything changed) that shows `board` on undo and on redo;
@@ -1288,15 +1296,14 @@ impl App {
         self.column_menu = None;
         self.limit_input = None;
         self.board_menu = false;
-        self.panel = None;
         self.archive = None;
         self.search = None;
         self.clear_filter();
         self.filter_menu = false;
     }
 
-    /// Runs at the end of every `update`: Selection and panel are cleared when their Card is no
-    /// longer an active Card on the current Board, and an open panel follows the selected Card.
+    /// Runs at the end of every `update`: the Selection is cleared when its Card is no longer an
+    /// active Card on the current Board, and the open Card closes when the Selection has no Card.
     /// The current Board is never archived or gone: it falls back to the next active Board
     /// below, else above (positions from `order`, the Board IDs before the update).
     fn validate_ui(&mut self, board: Option<Id>, order: &[Id]) {
@@ -1317,10 +1324,7 @@ impl App {
         self.validate_labels();
         self.validate_filter();
         self.validate_move();
-        self.panel = self.panel.filter(|card| self.on_board(*card));
-        if self.panel.is_some() {
-            self.panel = self.selection.and_then(|s| s.card).or(self.panel);
-        }
+        self.open &= self.selection.is_some_and(|s| s.card.is_some());
     }
 
     /// The Card is an active Card of the current Board.
@@ -1419,7 +1423,7 @@ impl App {
                     .into()
             }
             _ => {
-                // The open Card's title wraps: the panel is where it is read in full.
+                // A Card's title wraps: the open Card is where it is read in full.
                 let wrapping = match field {
                     Field::CardTitle(_) => text::Wrapping::Word,
                     _ => text::Wrapping::None,
@@ -1451,11 +1455,6 @@ impl App {
         let content: Element<_> = match self.data.boards.is_empty() {
             true => content, // first run: only "Create your first Board"
             false => row![crate::sidebar::view(self), content].into(),
-        };
-        // The panel pushes the Board narrower; it never overlays it.
-        let content: Element<_> = match self.panel.and_then(|id| self.data.card(id)) {
-            Some(card) => row![container(content).width(Fill), self.view_panel(card)].into(),
-            None => content,
         };
         // Clicks no widget took: leaving the description editor by clicking outside it.
         let content: Element<_> = mouse_area(content).on_press(Message::ClickOutside).into();
@@ -1632,7 +1631,7 @@ impl App {
             .into()
     }
 
-    /// The Board area's width (window less sidebar and panel); unbounded before the window
+    /// The Board area's width (window less sidebar); unbounded before the window
     /// reports a size.
     fn board_width(&self) -> f32 {
         let Some(size) = self.window.size() else {
@@ -1643,11 +1642,7 @@ impl App {
             (false, true) => crate::sidebar::RAIL,
             (false, false) => crate::sidebar::WIDTH,
         };
-        let panel = match self.panel {
-            Some(_) => crate::panel::WIDTH,
-            None => 0.0,
-        };
-        size.width - sidebar as f32 - panel
+        size.width - sidebar as f32
     }
 
     fn view_column<'a>(&'a self, col: &'a Column) -> Element<'a, Message> {
@@ -1672,36 +1667,29 @@ impl App {
                 .drag
                 .as_ref()
                 .is_some_and(|d| d.started && d.item == Item::Card(card.id));
-            // While its title or description is edited, the Card face shows both.
+            // A title is edited in place (only on the open Card: editing opens it).
             let title: Element<_> = match self.editing.as_ref().map(|e| (e.field, &e.text)) {
-                Some((Field::CardTitle(id), edit)) if id == card.id => column![
-                    text_input("Title", edit)
-                        .id(EDIT_INPUT)
-                        .on_input(Message::EditChanged)
-                        .on_submit(Message::CommitEdit),
-                    description::face_preview(card),
-                ]
-                .spacing(4)
-                .into(),
-                Some((Field::Description(id), _)) if id == card.id => {
-                    column![text(&card.title).width(Fill), self.description_editor(80)]
-                        .spacing(4)
-                        .into()
-                }
+                Some((Field::CardTitle(id), edit)) if id == card.id => text_input("Title", edit)
+                    .id(EDIT_INPUT)
+                    .on_input(Message::EditChanged)
+                    .on_submit(Message::CommitEdit)
+                    .into(),
                 _ => text(&card.title).width(Fill).into(),
             };
-            let card_box = card_face(self.board(), card, title)
-                .id(card_widget(card.id))
-                .style(move |theme| {
-                    let style = outline(theme);
-                    match lifted {
-                        true => container::Style {
-                            text_color: style.text_color.map(|c| c.scale_alpha(0.4)),
-                            ..style
-                        },
-                        false => style,
-                    }
-                });
+            let card_box = match self.open_card() == Some(card.id) {
+                true => self.view_open_card(card, title),
+                false => card_face(self.board(), card, title),
+            };
+            let card_box = card_box.id(card_widget(card.id)).style(move |theme| {
+                let style = outline(theme);
+                match lifted {
+                    true => container::Style {
+                        text_color: style.text_color.map(|c| c.scale_alpha(0.4)),
+                        ..style
+                    },
+                    false => style,
+                }
+            });
             // Indicator above, padding below: Card slots touch, so no gap between them
             // falls through to the Column body.
             let slot = container(column![drag::indicator(gap == Some(i)), card_box].spacing(2))
@@ -1869,6 +1857,69 @@ impl App {
             false => content,
         };
         center(content).into()
+    }
+}
+
+impl App {
+    /// The open Card: the selected Card expanded in place, unstyled. Its face's title, then
+    /// Labels, description, Checklist, and a footer with the Card's actions and times.
+    fn view_open_card<'a>(
+        &'a self,
+        card: &'a Card,
+        title: Element<'a, Message>,
+    ) -> container::Container<'a, Message> {
+        let tz = jiff::tz::TimeZone::system();
+        let header = row![
+            title,
+            crate::chrome::tip(
+                button("✕").style(button::text).on_press(Message::CloseCard),
+                "Close (Esc)"
+            )
+        ]
+        .spacing(8);
+        let actions = row![
+            crate::chrome::tip(
+                button("Move to Board…")
+                    .style(quiet)
+                    .on_press(Message::OpenMove),
+                "Move to Board (M)"
+            ),
+            crate::chrome::tip(
+                button("Archive")
+                    .style(quiet)
+                    .on_press(Message::ArchiveCard(card.id)),
+                "Archive Card (Del)"
+            ),
+        ]
+        .spacing(8);
+        // One time per line: both on one line overflow a 280px Column.
+        let times = column![
+            text(format!("Created {}", local_time(&card.created, &tz))).size(12),
+            text(format!("Updated {}", local_time(&card.updated, &tz))).size(12),
+        ];
+        container(
+            column![
+                header,
+                self.labels_row(card),
+                self.view_description(card),
+                self.view_checklist(card),
+                column![actions, times].spacing(6),
+            ]
+            .spacing(12),
+        )
+        .width(Fill)
+        .padding([9, 11])
+    }
+}
+
+/// An RFC 3339 timestamp as "YYYY-MM-DD HH:MM" in `tz`; text that doesn't parse is shown as is.
+pub fn local_time(timestamp: &str, tz: &jiff::tz::TimeZone) -> String {
+    match timestamp.parse::<jiff::Timestamp>() {
+        Ok(t) => t
+            .to_zoned(tz.clone())
+            .strftime("%Y-%m-%d %H:%M")
+            .to_string(),
+        Err(_) => timestamp.into(),
     }
 }
 
