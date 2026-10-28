@@ -125,8 +125,35 @@ fn enter_in_the_capture_box_adds_cards_at_the_bottom_and_keeps_it_open() {
         app.capture,
         Some(Capture {
             column: doing,
-            text: String::new()
+            text: String::new(),
+            description: String::new(),
         })
+    );
+}
+
+#[test]
+fn the_capture_box_adds_its_description_to_the_card_and_clears_both() {
+    let mut app = app_with_board();
+    let todo = column_id(&app, 0);
+    send(
+        &mut app,
+        [
+            Message::OpenCapture(todo),
+            Message::CaptureChanged("Spec".into()),
+            Message::CaptureDescriptionChanged("  the *why*  ".into()),
+            Message::SubmitCapture,
+            Message::CaptureChanged("Bare".into()),
+            Message::CaptureDescriptionChanged("   ".into()),
+            Message::SubmitCapture,
+        ],
+    );
+    let cards = &app.data.boards[0].columns[0].cards;
+    assert_eq!(cards[0].description, "the *why*");
+    assert_eq!(cards[1].description, "", "blank adds none");
+    let capture = app.capture.as_ref().unwrap();
+    assert_eq!(
+        (capture.text.as_str(), capture.description.as_str()),
+        ("", "")
     );
 }
 

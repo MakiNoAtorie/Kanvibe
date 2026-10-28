@@ -19,6 +19,10 @@ pub enum Input {
     /// The new-Board name prompt.
     BoardName,
     Capture,
+    /// The Capture box's description.
+    CaptureDescription,
+    /// The pending edit of a Card title.
+    CardTitle,
     /// The box of the pending edit (`app::Field`): a rename, later titles and the like.
     Edit,
     /// The box of a pending Checklist Item edit.
@@ -59,6 +63,15 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
     if ctrl && *key == Key::Named(Named::Tab) {
         return Some(Message::CycleBoard(!modifiers.shift()));
     }
+    // Tab steps from a Card's title to its description; Shift+Tab back in the Capture box.
+    if *key == Key::Named(Named::Tab) && !ctrl {
+        match (context.focused, modifiers.shift()) {
+            (Some(Input::Capture), false) => return Some(Message::FocusCapture(true)),
+            (Some(Input::CaptureDescription), true) => return Some(Message::FocusCapture(false)),
+            (Some(Input::CardTitle), false) => return Some(Message::EditDescription),
+            _ => {}
+        }
+    }
     if *key == Key::Named(Named::F1) {
         return Some(Message::ShowShortcuts);
     }
@@ -76,7 +89,7 @@ pub fn map(event: &keyboard::Event, context: &Context) -> Option<Message> {
         return None;
     }
     match key {
-        Key::Named(Named::Enter) if !ctrl => return Some(Message::OpenPanel),
+        Key::Named(Named::Enter) if !ctrl => return Some(Message::EditTitle),
         Key::Named(Named::F2) => return Some(Message::EditTitle),
         Key::Named(Named::Delete) => return Some(Message::ArchiveSelected),
         _ => {}

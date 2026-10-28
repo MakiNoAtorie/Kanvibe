@@ -83,6 +83,26 @@ fn n_opens_the_capture_box_unless_typing_or_with_ctrl() {
 }
 
 #[test]
+fn tab_and_shift_tab_move_between_the_capture_boxs_title_and_description() {
+    let description = Context {
+        focused: Some(Input::CaptureDescription),
+        dragging: false,
+    };
+    let tab = named(Named::Tab);
+    let shift_tab = press(Key::Named(Named::Tab), Modifiers::SHIFT);
+    assert_eq!(
+        keys::map(&tab, &CAPTURE_FOCUSED),
+        Some(Message::FocusCapture(true))
+    );
+    assert_eq!(
+        keys::map(&shift_tab, &description),
+        Some(Message::FocusCapture(false))
+    );
+    assert_eq!(keys::map(&tab, &description), None);
+    assert_eq!(keys::map(&tab, &NOTHING_FOCUSED), None);
+}
+
+#[test]
 fn a_focused_text_field_keeps_arrows_but_not_undo_redo_or_esc() {
     for key in [Named::ArrowUp, Named::ArrowDown] {
         assert_eq!(keys::map(&named(key), &CAPTURE_FOCUSED), None);

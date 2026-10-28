@@ -105,18 +105,66 @@ fn clicking_a_card_opens_the_panel_on_it() {
 }
 
 #[test]
-fn enter_opens_the_panel_on_the_selected_card() {
+fn enter_edits_the_selected_cards_title_in_the_panel() {
     let mut app = app_with_cards();
     let message = keys::map(&press(Named::Enter), &Context::default());
-    assert_eq!(message, Some(Message::OpenPanel));
+    assert_eq!(message, Some(Message::EditTitle));
 
-    send(&mut app, [Message::OpenPanel]);
+    send(&mut app, [Message::EditTitle]);
     assert_eq!(app.panel, None, "nothing selected");
 
     send(&mut app, [Message::MoveSelection(Direction::Down)]);
     assert_eq!(app.panel, None, "selecting alone does not open it");
-    send(&mut app, [Message::OpenPanel]);
-    assert_eq!(app.panel, Some(card(&app, "A")));
+    send(&mut app, [Message::EditTitle]);
+    let a = card(&app, "A");
+    assert_eq!(app.panel, Some(a));
+    assert_eq!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(Field::CardTitle(a))
+    );
+}
+
+#[test]
+fn double_clicking_a_card_edits_its_title_and_tab_moves_to_the_description() {
+    let mut app = app_with_cards();
+    let b = card(&app, "B");
+    // A double-click's events: press, release, press, double-click, release.
+    let item = kanvibe::drag::Item::Card(b);
+    send(
+        &mut app,
+        [
+            Message::DragPress(item),
+            Message::DragEnd,
+            Message::DragPress(item),
+            Message::EditCard(b),
+            Message::DragEnd,
+        ],
+    );
+    assert_eq!(app.panel, Some(b));
+    assert_eq!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(Field::CardTitle(b)),
+        "the second release does not commit the edit"
+    );
+
+    let title = Context {
+        focused: Some(keys::Input::CardTitle),
+        dragging: false,
+    };
+    let message = keys::map(&press(Named::Tab), &title);
+    assert_eq!(message, Some(Message::EditDescription));
+    send(
+        &mut app,
+        [
+            Message::EditChanged("Beta".into()),
+            Message::EditDescription,
+        ],
+    );
+    assert_eq!(app.data.name(b), Some("Beta"));
+    assert_eq!(
+        app.editing.as_ref().map(|e| e.field),
+        Some(Field::Description(b))
+    );
 }
 
 #[test]

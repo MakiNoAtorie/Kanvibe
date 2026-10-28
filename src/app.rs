@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) const BOARD_NAME_INPUT: &str = "board-name";
 const CAPTURE_INPUT: &str = "capture";
+const CAPTURE_DESCRIPTION: &str = "capture-description";
 pub(crate) const EDIT_INPUT: &str = "edit";
 const LIMIT_INPUT: &str = "limit";
 /// How long after the last keystroke a pending edit's live text is written to disk.
@@ -169,6 +170,16 @@ impl SaveJob {
     }
 }
 
+impl Capture {
+    fn new(column: Id) -> Capture {
+        Capture {
+            column,
+            text: String::new(),
+            description: String::new(),
+        }
+    }
+}
+
 fn not_saved(path: &std::path::Path, e: std::io::Error) -> String {
     format!("Not saved: {}: {e}", path.display())
 }
@@ -177,6 +188,8 @@ fn not_saved(path: &std::path::Path, e: std::io::Error) -> String {
 pub struct Capture {
     pub column: Id,
     pub text: String,
+    /// The new Card's description; blank adds none.
+    pub description: String,
 }
 
 /// A text field whose edits go straight into the Boards and become one undo step on commit.
@@ -232,6 +245,9 @@ pub enum Message {
     CreateBoard,
     OpenCapture(Id),
     CaptureChanged(String),
+    CaptureDescriptionChanged(String),
+    /// Tab (`true`) / Shift+Tab (`false`) in the Capture box: to its description / title.
+    FocusCapture(bool),
     SubmitCapture,
     /// A paste into the Capture box (its text after the paste); the clipboard is re-read.
     CapturePasted(String),
@@ -304,11 +320,13 @@ pub enum Message {
     DragCancel,
     /// Autoscroll timer while dragging.
     DragTick,
-    /// Enter: open the Card panel on the selected Card.
+    /// Open the Card panel on the selected Card.
     OpenPanel,
+    /// Double-click on a Card: select it and edit its title in the panel.
+    EditCard(Id),
     /// The panel's X button.
     ClosePanel,
-    /// F2: edit the open Card's title.
+    /// Enter or F2: edit the open or selected Card's title.
     EditTitle,
     /// Del: archive the selected Card.
     ArchiveSelected,
@@ -452,29 +470,31 @@ impl App {
             }
             Message::OpenCapture(column) => {
                 self.commit_pending();
-                self.capture = Some(Capture {
-                    column,
-                    text: String::new(),
-                });
-                // The box is at the end of the Column's scrolling list.
-                return Task::batch([
-                    operation::focus(CAPTURE_INPUT),
-                    operation::snap_to_end(cards_widget(column)),
-                ]);
+                self.capture = Some(Capture::new(column));
+                return focus_capture(column);
             }
             Message::CaptureChanged(text) => {
                 if let Some(capture) = &mut self.capture {
                     capture.text = text;
                 }
             }
+            Message::CaptureDescriptionChanged(text) => {
+                if let Some(capture) = &mut self.capture {
+                    capture.description = text;
+                }
+            }
+            Message::FocusCapture(description) => {
+                return operation::focus(match description {
+                    true => CAPTURE_DESCRIPTION,
+                    false => CAPTURE_INPUT,
+                });
+            }
             Message::SubmitCapture => {
                 if let Some(column) = self.capture.as_ref().map(|c| c.column) {
                     self.commit_pending();
-                    self.capture = Some(Capture {
-                        column,
-                        text: String::new(),
-                    });
-                    return self.reveal_selection();
+                    self.capture = Some(Capture::new(column));
+                    // The new Card shifts the box in the tree, which drops its focus.
+                    return focus_capture(column);
                 }
             }
             Message::CapturePasted(text) => {
@@ -553,6 +573,16 @@ impl App {
                     .is_some_and(|e| matches!(e.field, Field::Description(_)))
                 {
                     self.commit_pending();
+                }
+            }
+            Message::EditCard(card) => {
+                self.drag = None; // the double-click's own release is no click
+                if let Some(column) = self.data.column_of_card(card) {
+                    let select = self.update(Message::Select(Selection {
+                        column,
+                        card: Some(card),
+                    }));
+                    return Task::batch([select, self.update(Message::EditTitle)]);
                 }
             }
             Message::EditTitle => {
@@ -690,6 +720,7 @@ impl App {
             Message::KeyWithFocus(event, focused) => {
                 let item_or_edit = match self.editing.as_ref().map(|e| e.field) {
                     Some(Field::ChecklistItem(_)) => Input::Item,
+                    Some(Field::CardTitle(_)) => Input::CardTitle,
                     _ => Input::Edit,
                 };
                 let input = |target: selector::Target| {
@@ -699,6 +730,7 @@ impl App {
                     [
                         (BOARD_NAME_INPUT, Input::BoardName),
                         (CAPTURE_INPUT, Input::Capture),
+                        (CAPTURE_DESCRIPTION, Input::CaptureDescription),
                         (EDIT_INPUT, item_or_edit),
                         (description::EDITOR, Input::Edit),
                         (LIMIT_INPUT, Input::Edit), // a text box: keys go to it
@@ -1052,7 +1084,7 @@ impl App {
             }
         }
         self.record_step(self.data.board_of_column(column));
-        self.reveal_selection()
+        focus_capture(column)
     }
 
     /// Shows the selected Card in the panel (else keeps the open one) and returns it.
@@ -1098,6 +1130,10 @@ impl App {
         let mut recorded = false;
         if let Some(capture) = self.capture.take() {
             if let Some(card) = self.data.add_card(capture.column, &capture.text) {
+                let description = capture.description.trim();
+                if !description.is_empty() {
+                    self.data.set_description(card, description);
+                }
                 self.selection = Some(Selection {
                     column: capture.column,
                     card: Some(card),
@@ -1606,7 +1642,9 @@ impl App {
                 column: col.id,
                 index: i,
             };
-            drag::target(drag::source(slot, Item::Card(card.id)), target, dragging).into()
+            let source =
+                drag::source(slot, Item::Card(card.id)).on_double_click(Message::EditCard(card.id));
+            drag::target(source, target, dragging).into()
         });
         let cards = cards.chain([drag::indicator(gap == Some(col.cards.len()))]);
         // An empty Column says what it takes.
@@ -1628,14 +1666,20 @@ impl App {
             .into()
         });
         let footer: Element<_> = match &self.capture {
-            Some(capture) if capture.column == col.id => {
+            Some(capture) if capture.column == col.id => column![
                 text_input("Card title (Enter adds, Esc cancels)", &capture.text)
                     .id(CAPTURE_INPUT)
                     .on_input(Message::CaptureChanged)
                     .on_paste(Message::CapturePasted)
-                    .on_submit(Message::SubmitCapture)
-                    .into()
-            }
+                    .on_submit(Message::SubmitCapture),
+                text_input("Description (Tab, optional)", &capture.description)
+                    .id(CAPTURE_DESCRIPTION)
+                    .size(13)
+                    .on_input(Message::CaptureDescriptionChanged)
+                    .on_submit(Message::SubmitCapture),
+            ]
+            .spacing(4)
+            .into(),
             _ => crate::chrome::tip(
                 button("+ Add Card")
                     .style(faded(0.6))
@@ -2044,6 +2088,14 @@ const NARROW: f32 = 640.0;
 
 fn column_widget(column: Id) -> widget::Id {
     widget::Id::from(format!("column-{column}"))
+}
+
+/// Focuses the Capture box's title, at the end of the Column's scrolling list.
+fn focus_capture(column: Id) -> Task<Message> {
+    Task::batch([
+        operation::focus(CAPTURE_INPUT),
+        operation::snap_to_end(cards_widget(column)),
+    ])
 }
 
 fn cards_widget(column: Id) -> widget::Id {
