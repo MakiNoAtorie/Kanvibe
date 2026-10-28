@@ -1747,7 +1747,7 @@ pub(crate) fn clipped<'a>(
     line: impl Into<Element<'a, Message>>,
     full: impl Into<Element<'a, Message>>,
 ) -> container::Container<'a, Message> {
-    let full = container(full).padding(4).style(container::rounded_box);
+    let full = container(full).padding(4).style(container::bordered_box);
     container(tooltip(line, full, tooltip::Position::Bottom)).clip(true)
 }
 

@@ -211,7 +211,8 @@ pub fn tip<'a>(
         content,
         iced::widget::container(text(label).size(12))
             .padding(4)
-            .style(iced::widget::container::rounded_box),
+            // Bordered, so a tooltip over a gray Column still reads as its own box.
+            .style(iced::widget::container::bordered_box),
         tooltip::Position::Top,
     )
     .into()
